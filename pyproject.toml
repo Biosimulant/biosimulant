@@ -93,7 +93,7 @@ addopts = "-q"
 
 [project.optional-dependencies]
 dev = [
-  "biosimulant-model-compatibility-standard @ https://github.com/Biosimulant/model-compatibility-standard/archive/79091ee7c11de6961cba312b40169381c42682c5.tar.gz",
+  "biosimulant-model-compatibility-standard @ https://github.com/Biosimulant/model-compatibility-standard/archive/eca2dd6aec4d4bd0439f89fb693d7d6b3eece78c.tar.gz",
   "pytest>=7",
   "pytest-cov>=4",
   "httpx>=0.26",
@@ -107,7 +107,7 @@ cellml = [
   "scipy>=1.11,<2",
 ]
 compatibility = [
-  "biosimulant-model-compatibility-standard @ https://github.com/Biosimulant/model-compatibility-standard/archive/79091ee7c11de6961cba312b40169381c42682c5.tar.gz",
+  "biosimulant-model-compatibility-standard @ https://github.com/Biosimulant/model-compatibility-standard/archive/eca2dd6aec4d4bd0439f89fb693d7d6b3eece78c.tar.gz",
 ]
 # Everything
 all = [
