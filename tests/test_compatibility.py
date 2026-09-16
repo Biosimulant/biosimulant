@@ -119,9 +119,8 @@ def test_cli_validate_and_conformance(tmp_path: Path, capsys):
     assert profile_count > 0
     assert result["profiles"] == profile_count
     assert result["profile_fixtures_passed"] == fixture_count
-    assert result["release"] == "0.0.1"
-    assert result["ga_ready"] is False
-    assert result["ga_blockers"]
+    assert result["release"] == "0.0.2"
+    assert result["catalogue_status"] == "active"
 
 
 def test_compatibility_wrappers_keep_legacy_optional_and_execute_opt_in():

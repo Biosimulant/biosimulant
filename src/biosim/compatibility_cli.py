@@ -406,8 +406,7 @@ def _conformance() -> dict[str, Any]:
         "profiles": len(profiles),
         "profile_fixtures_passed": passed,
         "bundle_sha256": bundle.digest,
-        "ga_ready": bool(bundle.manifest.get("ga_ready", False)),
-        "ga_blockers": list(bundle.manifest.get("ga_blockers", [])),
+        "catalogue_status": bundle.catalogue["status"],
     }
 
 
