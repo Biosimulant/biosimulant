@@ -119,7 +119,7 @@ def test_cli_validate_and_conformance(tmp_path: Path, capsys):
     assert profile_count > 0
     assert result["profiles"] == profile_count
     assert result["profile_fixtures_passed"] == fixture_count
-    assert result["release"] == "0.0.2"
+    assert result["release"] == "0.0.3"
     assert result["catalogue_status"] == "active"
 
 

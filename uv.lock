@@ -123,9 +123,9 @@ ml = [
 [package.metadata]
 requires-dist = [
     { name = "argcomplete", specifier = ">=3.5" },
-    { name = "biosimulant-model-compatibility-standard", marker = "extra == 'all'", url = "https://github.com/Biosimulant/model-compatibility-standard/archive/69560c3e5d2d6fe030747aed23544849e57f3d11.tar.gz" },
-    { name = "biosimulant-model-compatibility-standard", marker = "extra == 'compatibility'", url = "https://github.com/Biosimulant/model-compatibility-standard/archive/69560c3e5d2d6fe030747aed23544849e57f3d11.tar.gz" },
-    { name = "biosimulant-model-compatibility-standard", marker = "extra == 'dev'", url = "https://github.com/Biosimulant/model-compatibility-standard/archive/69560c3e5d2d6fe030747aed23544849e57f3d11.tar.gz" },
+    { name = "biosimulant-model-compatibility-standard", marker = "extra == 'all'", url = "https://github.com/Biosimulant/model-compatibility-standard/archive/79091ee7c11de6961cba312b40169381c42682c5.tar.gz" },
+    { name = "biosimulant-model-compatibility-standard", marker = "extra == 'compatibility'", url = "https://github.com/Biosimulant/model-compatibility-standard/archive/79091ee7c11de6961cba312b40169381c42682c5.tar.gz" },
+    { name = "biosimulant-model-compatibility-standard", marker = "extra == 'dev'", url = "https://github.com/Biosimulant/model-compatibility-standard/archive/79091ee7c11de6961cba312b40169381c42682c5.tar.gz" },
     { name = "fastapi", specifier = ">=0.110,<1" },
     { name = "httpx", specifier = ">=0.26,<1" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.26" },
@@ -151,15 +151,15 @@ provides-extras = ["all", "cellml", "compatibility", "dev", "ml"]
 
 [[package]]
 name = "biosimulant-model-compatibility-standard"
-version = "0.0.2"
-source = { url = "https://github.com/Biosimulant/model-compatibility-standard/archive/69560c3e5d2d6fe030747aed23544849e57f3d11.tar.gz" }
+version = "0.0.3"
+source = { url = "https://github.com/Biosimulant/model-compatibility-standard/archive/79091ee7c11de6961cba312b40169381c42682c5.tar.gz" }
 dependencies = [
     { name = "jsonschema", extra = ["format"] },
     { name = "pyyaml" },
     { name = "referencing" },
     { name = "rfc8785" },
 ]
-sdist = { hash = "sha256:3870719ac8ff086371b49bb3f41c2f1fea66d0c7861b9323ec20e6a4dcd7fc7f" }
+sdist = { hash = "sha256:8be78b05a74aa76cef8bd012a1e0ebe8b091e64f25a2ad776716acbccedbfaf5" }
 
 [package.metadata]
 requires-dist = [
