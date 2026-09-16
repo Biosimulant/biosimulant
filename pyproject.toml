@@ -26,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "argcomplete>=3.5",
+  "biosimulant-model-compatibility-standard==0.1.0",
   "fastapi>=0.110,<1",
   "httpx>=0.26,<1",
   "numpy>=1.26",

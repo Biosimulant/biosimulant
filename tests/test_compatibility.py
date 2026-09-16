@@ -3,9 +3,6 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-import sys
-from types import SimpleNamespace
-from zipfile import ZipFile
 
 import pytest
 import yaml
@@ -21,667 +18,258 @@ from biosim import (
     SignalSpec,
     check_compatibility,
     check_payload,
+    compatibility_provenance,
     contract_digest,
-    register_checker,
-    registered_types,
-    validate_port_spec_direction,
 )
 from biosim.__main__ import main
-from biosim.compatibility import bind_manifest_ports, load_yaml, validate_manifest
+from biosim import compatibility as compatibility_module
 from biosim.compatibility import (
+    bind_manifest_ports,
     enforce_result,
+    load_yaml,
     manifest_has_compatibility_declarations,
     validate_contract,
+    validate_manifest,
 )
-from biosim.pack import build_package
 
-
-SMILES_CONTRACT = {"type": "chemical.smiles"}
-SEQUENCE_CONTRACT = {
-    "type": "protein.sequence",
-    "species": "NCBITaxon:9606",
-    "identifier_namespace": "UniProtKB",
+STANDARD = {
+    "standard": "biosimulant.model-compatibility",
+    "version": "0",
 }
+SEQUENCE = {"profile": "protein.sequence/v1"}
+HUMAN_SEQUENCE = {"profile": "protein.sequence/v1", "species": "NCBITaxon:9606"}
+SMILES = {"profile": "chemical.smiles/v1"}
+PROBABILITY = {"profile": "boltz.binding-probability/v1"}
+AFFINITY = {"profile": "boltz.log10-ic50-micromolar/v1"}
 
 
-def _port_manifest() -> dict:
+def _manifest(*, direction: str = "outputs", contract: dict | None = None) -> dict:
+    port = {
+        "name": "sequence",
+        "signal_type": "scalar",
+        "dtype": "str",
+        "format": "sequence",
+    }
+    if contract is not None:
+        port["contract"] = copy.deepcopy(contract)
     return {
         "schema_version": "2.0",
         "standard": "other",
         "title": "Compatibility example",
         "biosim": {"entrypoint": "src.model:Model"},
-        "io": {
-            "inputs": [],
-            "outputs": [
-                {
-                    "name": "sequence",
-                    "signal_type": "scalar",
-                    "dtype": "str",
-                    "format": "iupac-amino-acid",
-                    "contract": copy.deepcopy(SEQUENCE_CONTRACT),
-                }
-            ],
-        },
+        "compatibility": copy.deepcopy(STANDARD),
+        "io": {"inputs": [port] if direction == "inputs" else [], "outputs": [port] if direction == "outputs" else []},
     }
 
 
-def test_signal_spec_round_trip_keeps_simple_compatibility_facts() -> None:
-    spec = SignalSpec.scalar(
-        dtype="float64",
-        accepted_units=("nM", "uM"),
-        format="number",
-        contract={"type": "measurement.concentration", "species": "any"},
-    )
-    assert SignalSpec.from_dict(spec.to_dict()).to_dict() == spec.to_dict()
+def test_contract_validation_is_closed_and_profile_based(monkeypatch) -> None:
+    assert validate_contract(None).status == "ok"
+    assert validate_contract("bad").issues[0].code == "INVALID_CONTRACT"
+    assert validate_contract({}).issues[0].code == "PROFILE_UNKNOWN"
+    assert validate_contract({"profile": "missing/v1"}).issues[0].code == "PROFILE_UNKNOWN"
+    assert validate_contract({"profile": "chemical.smiles/v1", "species": "any"}).status == "blocked"
+    assert validate_contract({"profile": "protein.sequence/v1", "species": "any"}).status == "ok"
+    assert validate_contract({"profile": "protein.sequence/v1", "typo": "x"}).status == "blocked"
 
-    ambiguous = SignalSpec.scalar(
-        accepted_units=("nM",),
-        accepted_profiles=(AcceptedSignalProfile(signal_type="scalar"),),
-    )
-    with pytest.raises(ValueError, match="accepted_units or accepted_profiles"):
-        validate_port_spec_direction(ambiguous, direction="input")
-
-
-def test_static_checks_cover_semantics_species_namespace_format_and_units() -> None:
-    source = SignalSpec.scalar(
-        dtype="str",
-        format="iupac-amino-acid",
-        contract=SEQUENCE_CONTRACT,
-    )
-    target = SignalSpec.scalar(
-        dtype="str",
-        format="iupac-amino-acid",
-        contract=SEQUENCE_CONTRACT,
-    )
-    assert check_compatibility(source, target).status == "ok"
-
-    mouse = SignalSpec.scalar(
-        dtype="str",
-        format="iupac-amino-acid",
-        contract={**SEQUENCE_CONTRACT, "species": "NCBITaxon:10090"},
-    )
-    result = check_compatibility(mouse, target)
+    monkeypatch.delitem(compatibility_module._CHECKERS, "protein_sequence")
+    result = validate_contract(SEQUENCE)
     assert result.status == "blocked"
-    assert result.issues[-1].code == "SPECIES_MISMATCH"
-
-    wrong_format = SignalSpec.scalar(
-        dtype="str",
-        format="fasta",
-        contract=SEQUENCE_CONTRACT,
-    )
-    assert check_compatibility(wrong_format, target).status == "blocked"
-
-    concentration = {"type": "measurement.concentration"}
-    nm = SignalSpec.scalar(dtype="float64", emitted_unit="nM", contract=concentration)
-    kcal_target = SignalSpec.scalar(
-        dtype="float64",
-        accepted_units=("kcal/mol",),
-        contract=concentration,
-    )
-    assert check_compatibility(nm, kcal_target).status == "blocked"
-
-
-def test_missing_declaration_warns_instead_of_guessing() -> None:
-    source = SignalSpec.scalar(dtype="str")
-    target = SignalSpec.scalar(dtype="str", contract=SMILES_CONTRACT)
-    result = check_compatibility(source, target)
-    assert result.status == "warning"
-    assert result.issues[0].code == "SOURCE_UNDECLARED"
-
-    unimplemented = {"type": "example.unimplemented"}
-    generic = SignalSpec.scalar(dtype="float64", contract=unimplemented)
-    result = check_compatibility(generic, generic)
-    assert result.status == "warning"
     assert result.issues[-1].code == "CHECKER_UNAVAILABLE"
 
 
-def test_value_checks_reject_reaction_smiles_and_invalid_sequences() -> None:
-    smiles = check_payload(SMILES_CONTRACT, "CCO>>CC=O")
-    assert smiles.status == "blocked"
-    assert any(issue.code == "REACTION_SMILES" for issue in smiles.issues)
-
-    sequence = check_payload(SEQUENCE_CONTRACT, "ACD1")
-    assert sequence.status == "blocked"
-    assert sequence.issues[-1].code == "INVALID_SEQUENCE_CHARACTER"
-
-
-def test_builtin_checkers_cover_supported_carriers_and_parser_results(monkeypatch) -> None:
-    fake_chem = SimpleNamespace(
-        MolFromSmiles=lambda value: None if value == "not-smiles" else object()
+def test_connection_rules_are_exact_and_context_is_not_guessed() -> None:
+    plain = SignalSpec.scalar(dtype="str", format="sequence")
+    sequence = SignalSpec.scalar(dtype="str", format="sequence", contract=SEQUENCE)
+    human = SignalSpec.scalar(dtype="str", format="sequence", contract=HUMAN_SEQUENCE)
+    any_species = SignalSpec.scalar(
+        dtype="str", format="sequence", contract={"profile": "protein.sequence/v1", "species": "any"}
     )
-    monkeypatch.setitem(sys.modules, "rdkit", SimpleNamespace(Chem=fake_chem))
-
-    assert check_payload(SMILES_CONTRACT, "CCO").status == "ok"
-    assert check_payload(SMILES_CONTRACT, {"smiles": "CCO"}).status == "ok"
-    assert check_payload(SMILES_CONTRACT, ["CCO", "CCN"]).status == "ok"
-    assert check_payload(SMILES_CONTRACT, "not-smiles").issues[-1].code == "UNPARSEABLE_SMILES"
-    assert check_payload(SMILES_CONTRACT, "").issues[-1].code == "EMPTY_SMILES"
-    assert check_payload(SMILES_CONTRACT, "C C").issues[-1].code == "SMILES_WHITESPACE"
-    assert check_payload(SMILES_CONTRACT, "C(").issues[-1].code == "UNBALANCED_SMILES"
-    assert check_payload(SMILES_CONTRACT, 42).issues[-1].code == "INVALID_VALUE_CARRIER"
-
-    assert check_payload(SEQUENCE_CONTRACT, {"sequence": "ACDE"}).status == "ok"
-    assert check_payload(SEQUENCE_CONTRACT, ["ACD", "EFG"]).status == "ok"
-    assert check_payload(SEQUENCE_CONTRACT, "").issues[-1].code == "EMPTY_SEQUENCE"
-    assert check_payload(SEQUENCE_CONTRACT, 42).issues[-1].code == "INVALID_VALUE_CARRIER"
-
-    structure = {"type": "protein.structure"}
-    assert check_payload(structure, "ATOM").status == "ok"
-    assert check_payload(structure, None).status == "blocked"
-
-
-def test_yaml_loader_rejects_invalid_encoding_syntax_and_large_files(
-    tmp_path: Path,
-) -> None:
-    broken = tmp_path / "broken.yaml"
-    broken.write_text("io: [unclosed\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="invalid YAML"):
-        load_yaml(broken)
-
-    invalid_encoding = tmp_path / "invalid-encoding.yaml"
-    invalid_encoding.write_bytes(b"\xff")
-    with pytest.raises(ValueError, match="invalid YAML"):
-        load_yaml(invalid_encoding)
-
-    large = tmp_path / "large.yaml"
-    large.write_bytes(b"x" * (4 * 1024 * 1024 + 1))
-    with pytest.raises(ValueError, match="4 MiB"):
-        load_yaml(large)
-
-
-def test_model_can_register_a_namespaced_type_checker() -> None:
-    def check_score(source, target, sample):
-        if sample is not None and not 0 <= sample <= 1:
-            return [
-                CompatibilityIssue(
-                    level="blocked",
-                    code="SCORE_RANGE",
-                    message="The score must be between zero and one.",
-                )
-            ]
-        return []
-
-    register_checker("example.test_score", check_score)
-    assert "example.test_score" in registered_types()
-    contract = {"type": "example.test_score"}
-    spec = SignalSpec.scalar(dtype="float64", contract=contract)
-    assert check_compatibility(spec, spec, sample=1.5).status == "blocked"
-
-
-def test_checker_registration_and_result_validation_edges() -> None:
-    for kwargs, message in (
-        ({"level": "ok", "code": "X", "message": "x"}, "level"),
-        ({"level": "warning", "code": "X", "message": ""}, "message"),
-        ({"level": "warning", "code": "", "message": "x"}, "code"),
-    ):
-        with pytest.raises(ValueError, match=message):
-            CompatibilityIssue(**kwargs)
-
-    with pytest.raises(ValueError, match="dotted name"):
-        register_checker("not_dotted", lambda source, target, sample: [])
-    with pytest.raises(TypeError, match="callable"):
-        register_checker("example.not_callable", object())
-
-    warning = CompatibilityIssue(
-        level="warning", code="EXAMPLE_WARNING", message="Needs a closer look."
+    mouse = SignalSpec.scalar(
+        dtype="str", format="sequence", contract={"profile": "protein.sequence/v1", "species": "NCBITaxon:10090"}
     )
-    register_checker(
-        "example.result_object",
-        lambda source, target, sample: CompatibilityResult((warning,)),
-    )
-    contract = {"type": "example.result_object"}
-    assert check_payload(contract, 1).issues == (warning,)
-    with pytest.raises(ValueError, match="already registered"):
-        register_checker("example.result_object", lambda source, target, sample: [])
-    register_checker(
-        "example.result_object",
-        lambda source, target, sample: [],
-        replace=True,
-    )
-    assert check_payload(contract, 1).status == "ok"
+    smiles = SignalSpec.scalar(dtype="str", format="sequence", contract=SMILES)
 
-    register_checker("example.bad_return", lambda source, target, sample: ["bad"])
-    assert check_payload({"type": "example.bad_return"}, 1).issues[0].code == "CHECKER_FAILED"
+    assert check_compatibility(plain, plain).status == "ok"
+    assert check_compatibility(plain, sequence).issues[-1].code == "STANDARD_REQUIRED"
+    assert check_compatibility(sequence, plain).issues[-1].code == "STANDARD_REQUIRED"
+    assert check_compatibility(sequence, smiles).issues[-1].code == "PROFILE_MISMATCH"
+    assert check_compatibility(human, any_species).status == "ok"
+    assert check_compatibility(sequence, human).issues[-1].code == "CONTEXT_MISSING"
+    assert check_compatibility(any_species, human).issues[-1].code == "CONTEXT_MISSING"
+    assert check_compatibility(mouse, human).issues[-1].code == "CONTEXT_MISMATCH"
 
-    def broken(source, target, sample):
+
+def test_structural_mismatch_blocks_before_profile_comparison() -> None:
+    source = SignalSpec.scalar(dtype="str", format="sequence", contract=SEQUENCE)
+    wrong_format = SignalSpec.scalar(dtype="str", format="fasta", contract=SEQUENCE)
+    wrong_dtype = SignalSpec.scalar(dtype="float64", contract=PROBABILITY)
+    numeric_target = SignalSpec.scalar(dtype="float32", contract=PROBABILITY)
+    assert check_compatibility(source, wrong_format).issues[0].code == "PROFILE_REPRESENTATION_MISMATCH"
+    assert check_compatibility(wrong_dtype, numeric_target).issues[0].code == "PROFILE_REPRESENTATION_MISMATCH"
+
+
+def test_value_checkers_cover_all_six_profiles(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(compatibility_module, "_CHECKERS", dict(compatibility_module._CHECKERS))
+    assert check_payload(SEQUENCE, "ACDEFG").status == "ok"
+    assert check_payload(SEQUENCE, "ACD1").status == "blocked"
+    assert check_payload(SMILES, "CCO>>CC=O").status == "blocked"
+    assert check_payload(PROBABILITY, 0.5).status == "ok"
+    assert check_payload(PROBABILITY, 1.1).status == "blocked"
+    assert check_payload(PROBABILITY, True).status == "blocked"
+    assert check_payload(AFFINITY, -2.1).status == "ok"
+    assert check_payload(AFFINITY, float("inf")).status == "blocked"
+
+    a3m = tmp_path / "query.a3m"
+    a3m.write_text(">query\nACDE\n>hit\nAC-E\n", encoding="utf-8")
+    assert check_payload({"profile": "protein.multiple-sequence-alignment/v1"}, str(a3m)).status == "ok"
+    a3m.write_text("ACDE\n", encoding="utf-8")
+    assert check_payload({"profile": "protein.multiple-sequence-alignment/v1"}, str(a3m)).status == "blocked"
+
+    cif = tmp_path / "model.cif"
+    cif.write_text("data_model\n_entry.id model\n", encoding="utf-8")
+    assert check_payload({"profile": "protein-ligand.complex-structure-mmcif/v1"}, str(cif)).status == "ok"
+    cif.write_text("_entry.id model\n", encoding="utf-8")
+    assert check_payload({"profile": "protein-ligand.complex-structure-mmcif/v1"}, str(cif)).status == "blocked"
+
+
+def test_checker_exception_fails_closed(monkeypatch) -> None:
+    def broken(value):
         raise RuntimeError("broken checker")
 
-    register_checker("example.broken", broken)
-    result = check_payload({"type": "example.broken"}, 1)
+    monkeypatch.setitem(compatibility_module._CHECKERS, "finite_number", broken)
+    result = check_payload(AFFINITY, 1.0)
     assert result.status == "blocked"
-    assert "broken checker" in result.issues[0].message
+    assert result.issues[-1].code == "CHECKER_FAILED"
 
 
-def test_contract_validation_and_all_generic_comparison_outcomes() -> None:
-    assert validate_contract(None).status == "ok"
-    assert validate_contract("bad").issues[0].code == "INVALID_CONTRACT"
-    assert validate_contract({}).issues[0].code == "MISSING_TYPE"
-    assert validate_contract({"type": "protein"}).issues[0].code == "INVALID_TYPE"
-    invalid_context = validate_contract(
-        {
-            "type": "protein.sequence",
-            "species": "",
-            "identifier_namespace": 42,
-        }
-    )
-    assert {issue.code for issue in invalid_context.issues} == {
-        "INVALID_SPECIES",
-        "INVALID_IDENTIFIER_NAMESPACE",
-    }
-    assert check_payload(None, "anything").status == "ok"
-
-    protein = SignalSpec.scalar(dtype="str", contract={"type": "protein.sequence"})
-    smiles = SignalSpec.scalar(dtype="str", contract={"type": "chemical.smiles"})
-    assert check_compatibility(protein, smiles).issues[0].code == "TYPE_MISMATCH"
-    assert check_compatibility(protein, SignalSpec.scalar(dtype="str")).issues[0].code == "TARGET_UNDECLARED"
-
-    target = SignalSpec.scalar(
-        dtype="str",
-        contract={
-            "type": "protein.sequence",
-            "species": "NCBITaxon:9606",
-            "identifier_namespace": "UniProtKB",
-        },
-    )
-    source = SignalSpec.scalar(
-        dtype="str",
-        contract={"type": "protein.sequence", "species": "any"},
-    )
-    issues = check_compatibility(source, target).issues
-    assert {issue.code for issue in issues} == {
-        "SPECIES_UNDECLARED",
-        "IDENTIFIER_NAMESPACE_UNDECLARED",
-    }
-
-    wrong_namespace = SignalSpec.scalar(
-        dtype="str",
-        contract={
-            "type": "protein.sequence",
-            "species": "NCBITaxon:9606",
-            "identifier_namespace": "RefSeq",
-        },
-    )
-    assert any(
-        issue.code == "IDENTIFIER_NAMESPACE_MISMATCH"
-        for issue in check_compatibility(wrong_namespace, target).issues
-    )
-
-    event = SignalSpec.event(contract={"type": "protein.sequence"})
-    assert check_compatibility(event, target).issues[0].code == "SIGNAL_KIND_MISMATCH"
-
-    blocked = CompatibilityResult(
-        (CompatibilityIssue("blocked", "Stop.", "STOP"),)
-    )
-    with pytest.raises(ValueError, match="context: Stop"):
-        enforce_result(blocked, context="context")
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        (lambda m: m.pop("compatibility"), "STANDARD_REQUIRED"),
+        (lambda m: m["compatibility"].update({"standard": "other"}), "STANDARD_MISMATCH"),
+        (lambda m: m["compatibility"].update({"version": "1"}), "STANDARD_MISMATCH"),
+        (lambda m: m["io"]["outputs"][0].update({"dtype": "float64"}), "PROFILE_REPRESENTATION_MISMATCH"),
+        (lambda m: m["io"]["outputs"][0].update({"format": "fasta"}), "PROFILE_REPRESENTATION_MISMATCH"),
+    ],
+)
+def test_manifest_validation_blocks_invalid_declarations(change, code: str) -> None:
+    manifest = _manifest(contract=SEQUENCE)
+    change(manifest)
+    assert code in {item["code"] for item in validate_manifest(manifest)}
 
 
-def test_manifest_validation_rejects_old_block_and_unknown_contract_fields() -> None:
-    old = _port_manifest()
-    old["compatibility"] = {"standard": "old"}
-    findings = validate_manifest(old)
-    assert findings[0]["code"] == "LEGACY_COMPATIBILITY_BLOCK"
-
-    invalid = _port_manifest()
-    invalid["io"]["outputs"][0]["contract"]["profile_refs"] = []
-    findings = validate_manifest(invalid)
-    assert any(item["code"] == "UNKNOWN_CONTRACT_FIELD" for item in findings)
+def test_manifest_without_profiles_remains_valid() -> None:
+    manifest = _manifest(contract=None)
+    manifest.pop("compatibility")
+    assert validate_manifest(manifest) == []
+    assert manifest_has_compatibility_declarations(manifest) is False
 
 
-def test_manifest_validation_reports_each_malformed_shape() -> None:
-    assert validate_manifest({}) == []
-    assert validate_manifest({"io": "bad"})[0]["code"] == "INVALID_IO"
-    assert validate_manifest({"io": {"inputs": "bad"}})[0]["code"] == "INVALID_PORTS"
-
-    manifest = {
-        "io": {
-            "inputs": [
-                42,
-                {"name": ""},
-                {"name": "x"},
-                {"name": "x", "accepted_profiles": "bad"},
-                {"name": "y", "accepted_profiles": [42]},
-                {
-                    "name": "z",
-                    "accepted_profiles": [
-                        {"contract": {"type": "not-dotted"}}
-                    ],
-                },
-                {"name": "none", "accepted_profiles": None},
-            ],
-            "outputs": [],
-        }
-    }
+def test_manifest_rejects_unknown_context_and_port_shapes() -> None:
+    manifest = _manifest(contract={"profile": "boltz.binding-probability/v1", "species": "any"})
     codes = {item["code"] for item in validate_manifest(manifest)}
-    assert {
-        "INVALID_PORT",
-        "INVALID_PORT_NAME",
-        "DUPLICATE_PORT_NAME",
-        "INVALID_ACCEPTED_PROFILES",
-        "INVALID_ACCEPTED_PROFILE",
-        "INVALID_TYPE",
-    } <= codes
-
-    assert manifest_has_compatibility_declarations({}) is False
-    assert manifest_has_compatibility_declarations({"io": "bad"}) is False
-    assert (
-        manifest_has_compatibility_declarations(
-            {"io": {"inputs": "bad", "outputs": [42]}}
-        )
-        is False
-    )
-    assert (
-        manifest_has_compatibility_declarations(
-            {"io": {"inputs": [{"name": "x", "accepted_units": ["nM"]}]}}
-        )
-        is True
-    )
+    assert "PROFILE_REPRESENTATION_MISMATCH" in codes
+    assert validate_manifest({"io": "bad"})[0]["code"] == "PROFILE_REPRESENTATION_MISMATCH"
 
 
-def test_manifest_binding_reports_port_and_profile_errors() -> None:
-    class EmptyModel(BioModule):
-        def inputs(self):
-            return {}
-
-        def outputs(self):
-            return {}
-
-    for manifest, message in (
-        ({"io": {"inputs": "bad", "outputs": []}}, "must be a list"),
-        ({"io": {"inputs": [42], "outputs": []}}, "must be a mapping"),
-        ({"io": {"inputs": [{"name": ""}], "outputs": []}}, "non-empty"),
-        (
-            {"io": {"inputs": [{"name": "x"}, {"name": "x"}], "outputs": []}},
-            "more than once",
-        ),
-    ):
-        with pytest.raises(ValueError, match=message):
-            bind_manifest_ports(EmptyModel(), manifest)
-
-    class NonMappingModel(BioModule):
-        def inputs(self):
-            return []
-
-        def outputs(self):
-            return {}
-
-    with pytest.raises(ValueError, match="return a dict"):
-        bind_manifest_ports(NonMappingModel(), {"io": {"inputs": [], "outputs": []}})
-
-    class ProfileModel(BioModule):
-        def inputs(self):
-            return {
-                "dose": SignalSpec.scalar(
-                    dtype="float64",
-                    accepted_profiles=(
-                        AcceptedSignalProfile(
-                            signal_type="scalar",
-                            dtype="float32",
-                            accepted_units=("nM",),
-                            format="number",
-                            contract={"type": "measurement.concentration"},
-                        ),
-                    ),
-                )
-            }
-
-        def outputs(self):
-            return {}
-
-    base_profile = {
-        "signal_type": "scalar",
-        "dtype": "float32",
-        "accepted_units": ["nM"],
-        "format": "number",
-        "contract": {"type": "measurement.concentration"},
-    }
-    manifest = {
-        "io": {
-            "inputs": [
-                {
-                    "name": "dose",
-                    "signal_type": "scalar",
-                    "dtype": "float64",
-                    "accepted_profiles": [base_profile],
-                }
-            ],
-            "outputs": [],
-        }
-    }
-    inputs, _ = bind_manifest_ports(ProfileModel(), manifest)
-    assert inputs["dose"].accepted_profiles[0].format == "number"
-
-    conflict = copy.deepcopy(manifest)
-    conflict["io"]["inputs"][0]["accepted_profiles"][0]["contract"] = {
-        "type": "measurement.affinity"
-    }
-    with pytest.raises(ValueError, match="contract differs"):
-        bind_manifest_ports(ProfileModel(), conflict)
-
-    missing_profiles = copy.deepcopy(manifest)
-    missing_profiles["io"]["inputs"][0]["accepted_profiles"] = [base_profile, base_profile]
-    with pytest.raises(ValueError, match="lists 2 accepted profile"):
-        bind_manifest_ports(ProfileModel(), missing_profiles)
-
-    malformed_profile = copy.deepcopy(manifest)
-    malformed_profile["io"]["inputs"][0]["accepted_profiles"] = [42]
-    with pytest.raises(ValueError, match="must be a mapping"):
-        bind_manifest_ports(ProfileModel(), malformed_profile)
-
-    class NoProfileModel(BioModule):
-        def inputs(self):
-            return {"dose": SignalSpec.scalar(dtype="float64")}
-
-        def outputs(self):
-            return {}
-
-    with pytest.raises(ValueError, match="lists 1 accepted profile"):
-        bind_manifest_ports(NoProfileModel(), copy.deepcopy(manifest))
-
-    nonlist_profiles = copy.deepcopy(manifest)
-    nonlist_profiles["io"]["inputs"][0]["accepted_profiles"] = "bad"
-    with pytest.raises(ValueError, match="must be a list"):
-        bind_manifest_ports(ProfileModel(), nonlist_profiles)
-
-    wrong_format = copy.deepcopy(manifest)
-    wrong_format["io"]["inputs"][0]["accepted_profiles"][0]["format"] = "text"
-    with pytest.raises(ValueError, match=r"\.format is"):
-        bind_manifest_ports(ProfileModel(), wrong_format)
-
-    class OutputProfileModel(BioModule):
-        def inputs(self):
-            return {}
-
-        def outputs(self):
-            return {
-                "x": SignalSpec.scalar(
-                    accepted_profiles=(AcceptedSignalProfile(signal_type="scalar"),)
-                )
-            }
-
-    with pytest.raises(ValueError, match="only valid on inputs"):
-        bind_manifest_ports(
-            OutputProfileModel(),
-            {
-                "io": {
-                    "inputs": [],
-                    "outputs": [
-                        {
-                            "name": "x",
-                            "signal_type": "scalar",
-                            "accepted_profiles": [{"signal_type": "scalar"}],
-                        }
-                    ],
-                }
-            },
-        )
-
-
-class _ContractBoundModel(BioModule):
+class _SequenceModel(BioModule):
     execution_policy = "each_window"
 
     def inputs(self):
-        return {
-            "dose": SignalSpec.scalar(
-                dtype="float64",
-                accepted_units=("nM",),
-            )
-        }
+        return {}
 
     def outputs(self):
-        return {
-            "sequence": SignalSpec.scalar(
-                dtype="str",
-                format="iupac-amino-acid",
-            )
-        }
+        return {"sequence": SignalSpec.scalar(dtype="str", format="sequence")}
 
     def execute(self, inputs, *, context: ExecutionContext):
         return {"sequence": "ACDE"}
 
 
-def test_manifest_contracts_bind_to_runtime_specs() -> None:
-    manifest = _port_manifest()
-    manifest["io"]["inputs"] = [
-        {
-            "name": "dose",
-            "signal_type": "scalar",
-            "dtype": "float64",
-            "accepted_units": ["nM"],
-            "contract": {"type": "measurement.concentration"},
-        }
-    ]
-    model = _ContractBoundModel()
-    inputs, outputs = bind_manifest_ports(model, manifest)
-    assert inputs["dose"].contract == {"type": "measurement.concentration"}
-    assert outputs["sequence"].contract == SEQUENCE_CONTRACT
-
-    world = BioWorld(communication_step=1.0)
-    world.add_biomodule("model", model)
-    assert world._modules["model"].output_specs["sequence"].contract == SEQUENCE_CONTRACT
+def test_manifest_contract_binds_to_python_signal_spec() -> None:
+    model = _SequenceModel()
+    _, outputs = bind_manifest_ports(model, _manifest(contract=SEQUENCE))
+    assert outputs["sequence"].contract == SEQUENCE
 
 
-def test_manifest_and_python_contracts_cannot_disagree() -> None:
-    class ConflictingModel(_ContractBoundModel):
+def test_manifest_and_python_structure_or_contract_cannot_disagree() -> None:
+    class Conflict(_SequenceModel):
         def outputs(self):
-            return {
-                "sequence": SignalSpec.scalar(
-                    dtype="str",
-                    format="iupac-amino-acid",
-                    contract={**SEQUENCE_CONTRACT, "species": "NCBITaxon:10090"},
-                )
-            }
+            return {"sequence": SignalSpec.scalar(dtype="str", format="sequence", contract=HUMAN_SEQUENCE)}
 
-    manifest = _port_manifest()
-    manifest["io"]["inputs"] = [
-        {
-            "name": "dose",
-            "signal_type": "scalar",
-            "dtype": "float64",
-            "accepted_units": ["nM"],
-        }
-    ]
     with pytest.raises(ValueError, match="contract differs"):
-        bind_manifest_ports(ConflictingModel(), manifest)
+        bind_manifest_ports(Conflict(), _manifest(contract=SEQUENCE))
+
+    wrong = _manifest(contract=SEQUENCE)
+    wrong["io"]["outputs"][0]["format"] = "fasta"
+    with pytest.raises(ValueError, match="Port representation"):
+        bind_manifest_ports(_SequenceModel(), wrong)
 
 
-def test_package_keeps_port_contract_without_generating_a_compatibility_lock(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "model"
-    (source / "src").mkdir(parents=True)
-    manifest = _port_manifest()
-    (source / "model.yaml").write_text(
-        yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8"
-    )
-    (source / "src" / "model.py").write_text(
-        "class Model:\n    pass\n", encoding="utf-8"
-    )
-
-    package = build_package(source)
-    with ZipFile(package) as archive:
-        names = set(archive.namelist())
-        packaged = yaml.safe_load(archive.read("payload/model.yaml"))
-    assert "payload/compatibility.lock.json" not in names
-    assert packaged["io"]["outputs"][0]["contract"] == SEQUENCE_CONTRACT
-
-
-def test_cli_validates_compares_and_lists_current_types(tmp_path: Path, capsys) -> None:
-    producer = tmp_path / "producer.yaml"
-    producer.write_text(yaml.safe_dump(_port_manifest()), encoding="utf-8")
-
-    consumer_manifest = _port_manifest()
-    consumer_manifest["io"] = {
-        "inputs": [
-            {
-                "name": "sequence",
-                "signal_type": "scalar",
-                "dtype": "str",
-                "format": "iupac-amino-acid",
-                "contract": SEQUENCE_CONTRACT,
-            }
-        ],
-        "outputs": [],
-    }
-    consumer = tmp_path / "consumer.yaml"
-    consumer.write_text(yaml.safe_dump(consumer_manifest), encoding="utf-8")
-
-    main(["compatibility", "validate", str(producer)])
-    assert json.loads(capsys.readouterr().out)["valid"] is True
-
-    main(
-        [
-            "compatibility",
-            "compare",
-            f"{producer}#outputs.sequence",
-            f"{consumer}#inputs.sequence",
-            "--sample-json",
-            '"ACDE"',
-        ]
-    )
-    assert json.loads(capsys.readouterr().out)["status"] == "ok"
-
-    main(["compatibility", "types"])
-    listed = json.loads(capsys.readouterr().out)
-    assert "chemical.smiles" in listed["types"]
-
-
-def test_cli_and_yaml_errors_are_explicit(tmp_path: Path, capsys) -> None:
-    invalid_yaml = tmp_path / "invalid.yaml"
-    invalid_yaml.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="top level must be a YAML mapping"):
-        load_yaml(invalid_yaml)
-
-    with pytest.raises(SystemExit) as raised:
-        main(["compatibility", "compare", str(invalid_yaml), str(invalid_yaml)])
-    assert raised.value.code == 2
-    assert "Point to a port" in capsys.readouterr().err
-
-
-def test_signal_envelope_uses_the_local_contract_digest() -> None:
+def test_contract_digest_qualifies_profile_definition_and_context() -> None:
+    assert contract_digest(SEQUENCE) != contract_digest(HUMAN_SEQUENCE)
+    assert len(contract_digest(SEQUENCE)) == 71
     envelope = SignalEnvelope(
-        contract_digest=contract_digest(SEQUENCE_CONTRACT),
+        contract_digest=contract_digest(HUMAN_SEQUENCE),
         value="ACDE",
         actual_context={"species": "NCBITaxon:9606"},
-        provenance={"run": "source-run"},
     )
-    envelope.validate_contract(SEQUENCE_CONTRACT)
-    assert SignalEnvelope.from_dict(envelope.to_dict()).provenance == {
-        "run": "source-run"
-    }
-
-    invalid = SignalEnvelope(contract_digest="sha256:" + "0" * 64, value="ACDE")
+    envelope.validate_contract(HUMAN_SEQUENCE)
     with pytest.raises(ValueError, match="different contract"):
-        invalid.validate_contract(SEQUENCE_CONTRACT)
+        envelope.validate_contract(SEQUENCE)
+
+
+def test_provenance_contains_only_profiles_used_by_manifest() -> None:
+    manifest = _manifest(contract=SEQUENCE)
+    provenance = compatibility_provenance(manifest)
+    assert provenance["standard"] == "biosimulant.model-compatibility"
+    assert provenance["version"] == "0"
+    assert provenance["catalogue_version"] == "0.1.0"
+    assert [item["ref"] for item in provenance["profiles"]] == ["protein.sequence/v1"]
+    assert compatibility_provenance(_manifest(contract=None)) is None
+
+
+def test_cli_reports_standard_profiles_validation_and_comparison(tmp_path: Path, capsys) -> None:
+    producer = tmp_path / "producer.yaml"
+    consumer = tmp_path / "consumer.yaml"
+    producer.write_text(yaml.safe_dump(_manifest(contract=SEQUENCE)), encoding="utf-8")
+    consumer.write_text(yaml.safe_dump(_manifest(direction="inputs", contract=SEQUENCE)), encoding="utf-8")
+
+    main(["compatibility", "standard"])
+    assert json.loads(capsys.readouterr().out)["version"] == "0"
+    main(["compatibility", "profiles"])
+    assert json.loads(capsys.readouterr().out)["count"] == 6
+    main(["compatibility", "show", "protein.sequence/v1"])
+    assert json.loads(capsys.readouterr().out)["ref"] == "protein.sequence/v1"
+    main(["compatibility", "validate", str(producer)])
+    assert json.loads(capsys.readouterr().out)["valid"] is True
+    main([
+        "compatibility",
+        "compare",
+        f"{producer}#outputs.sequence",
+        f"{consumer}#inputs.sequence",
+        "--sample-json",
+        '"ACDE"',
+    ])
+    assert json.loads(capsys.readouterr().out)["status"] == "ok"
+
+
+def test_yaml_loader_and_enforcement_errors_are_explicit(tmp_path: Path) -> None:
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("io: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid YAML"):
+        load_yaml(broken)
+    blocked = compatibility_module.CompatibilityResult(
+        (compatibility_module.CompatibilityIssue("blocked", "Stop.", "STOP"),)
+    )
+    with pytest.raises(ValueError, match="context: Stop"):
+        enforce_result(blocked, context="context")
 
 
 class _BadSequenceProducer(BioModule):
     execution_policy = "each_window"
 
     def outputs(self):
-        return {
-            "sequence": SignalSpec.scalar(dtype="str", contract=SEQUENCE_CONTRACT)
-        }
+        return {"sequence": SignalSpec.scalar(dtype="str", format="sequence", contract=SEQUENCE)}
 
     def execute(self, inputs, *, context: ExecutionContext):
         return {"sequence": "ACD1"}
@@ -691,18 +279,206 @@ class _SequenceConsumer(BioModule):
     execution_policy = "each_window"
 
     def inputs(self):
-        return {
-            "sequence": SignalSpec.scalar(dtype="str", contract=SEQUENCE_CONTRACT)
-        }
+        return {"sequence": SignalSpec.scalar(dtype="str", format="sequence", contract=SEQUENCE)}
 
     def execute(self, inputs, *, context: ExecutionContext):
         return {}
 
 
-def test_world_rechecks_the_actual_value_when_it_crosses_a_wire() -> None:
+def test_world_rechecks_actual_values_on_internal_wires() -> None:
     world = BioWorld(communication_step=1.0)
     world.add_biomodule("producer", _BadSequenceProducer())
     world.add_biomodule("consumer", _SequenceConsumer())
     world.connect("producer.sequence", "consumer.sequence")
     with pytest.raises(ValueError, match="unsupported character"):
         world.run(2.0)
+
+
+def test_result_objects_checker_edges_and_warning_logging(monkeypatch, caplog) -> None:
+    with pytest.raises(ValueError, match="level"):
+        CompatibilityIssue("ok", "message", "CODE")
+    with pytest.raises(ValueError, match="message and code"):
+        CompatibilityIssue("warning", "", "CODE")
+    warning = CompatibilityIssue("warning", "Review this.", "REVIEW")
+    result = CompatibilityResult((warning,))
+    assert result.status == "warning"
+    assert result.compatible is True
+    assert result.to_dict()["issues"] == [warning.to_dict()]
+    enforce_result(result, context="example")
+    assert "Review this" in caplog.text
+
+    monkeypatch.setitem(
+        compatibility_module._CHECKERS,
+        "finite_number",
+        lambda value: CompatibilityResult((warning,)),
+    )
+    assert check_payload(AFFINITY, 1.0).status == "warning"
+    monkeypatch.setitem(compatibility_module._CHECKERS, "finite_number", lambda value: ["bad"])
+    assert check_payload(AFFINITY, 1.0).issues[-1].code == "CHECKER_FAILED"
+    monkeypatch.delitem(compatibility_module._CHECKERS, "finite_number")
+    assert compatibility_module._run_checker(
+        compatibility_module.get_profile("boltz.log10-ic50-micromolar/v1"), 1.0
+    )[0].code == "CHECKER_UNAVAILABLE"
+    with pytest.raises(ValueError, match="invalid compatibility contract"):
+        contract_digest({"profile": "missing/v1"})
+
+
+def test_manifest_validation_and_representation_branch_edges() -> None:
+    malformed = {
+        "compatibility": {"standard": "bad", "version": "0", "extra": True},
+        "io": {
+            "inputs": [
+                42,
+                {"name": ""},
+                {"name": "x"},
+                {"name": "x", "accepted_profiles": "bad"},
+                {"name": "y", "accepted_profiles": [42]},
+                {"name": "z", "accepted_profiles": [{"contract": {"profile": "missing/v1"}}]},
+            ],
+            "outputs": "bad",
+        },
+    }
+    findings = validate_manifest(malformed)
+    assert len(findings) >= 8
+    assert manifest_has_compatibility_declarations({"compatibility": STANDARD}) is True
+    assert manifest_has_compatibility_declarations({"io": {"outputs": [{"contract": SEQUENCE}]}}) is True
+    assert manifest_has_compatibility_declarations({"io": "bad"}) is False
+
+    assert compatibility_module._shape_allowed([2, 3], [2, "*"]) is True
+    assert compatibility_module._shape_allowed(None, [2]) is False
+    assert compatibility_module._shape_allowed([2], [2, 3]) is False
+    assert compatibility_module._field_matches("schema", {"x": "str"}, {"x": "str"}) is True
+    assert compatibility_module._field_matches("accepted_units", ["1"], ("1",)) is True
+    assert compatibility_module._port_representation(
+        {"signal_type": "scalar", "dtype": "float64", "emitted_unit": "1"},
+        direction="outputs",
+    )["unit"] == "1"
+    assert compatibility_module._port_representation(
+        {"signal_type": "scalar", "dtype": "float64", "accepted_units": ["1"]},
+        direction="inputs",
+    )["unit"] == "1"
+
+
+def test_additional_connection_context_and_checker_paths() -> None:
+    source = SignalSpec.scalar(
+        dtype="str",
+        format="sequence",
+        contract={"profile": "protein.sequence/v1", "identifier_namespace": "RefSeq"},
+    )
+    missing_target = SignalSpec.scalar(
+        dtype="str",
+        format="sequence",
+        contract={"profile": "protein.sequence/v1", "identifier_namespace": "UniProtKB"},
+    )
+    no_namespace = SignalSpec.scalar(dtype="str", format="sequence", contract=SEQUENCE)
+    assert check_compatibility(no_namespace, missing_target).issues[-1].code == "CONTEXT_MISSING"
+    assert check_compatibility(source, missing_target).issues[-1].code == "CONTEXT_MISMATCH"
+
+    event = SignalSpec.event(contract=SEQUENCE)
+    assert check_compatibility(event, no_namespace).status == "blocked"
+    invalid = SignalSpec.scalar(dtype="str", format="sequence", contract={"profile": "missing/v1"})
+    assert check_compatibility(invalid, invalid).status == "blocked"
+
+    accepted = SignalSpec.scalar(
+        dtype="str",
+        accepted_profiles=(
+            AcceptedSignalProfile(
+                signal_type="scalar",
+                dtype="str",
+                format="sequence",
+                contract=SEQUENCE,
+            ),
+        ),
+    )
+    assert check_compatibility(no_namespace, accepted, sample="ACDE").status == "ok"
+
+
+def test_binding_rejects_malformed_and_mismatched_models() -> None:
+    class Empty(BioModule):
+        def inputs(self):
+            return {}
+
+        def outputs(self):
+            return {}
+
+    with pytest.raises(ValueError, match="io.inputs"):
+        bind_manifest_ports(Empty(), {"io": {"inputs": "bad", "outputs": []}})
+
+    class NonMapping(BioModule):
+        def inputs(self):
+            return []
+
+        def outputs(self):
+            return {}
+
+    with pytest.raises(ValueError, match="return a dict"):
+        bind_manifest_ports(NonMapping(), {"io": {"inputs": [], "outputs": []}})
+
+    with pytest.raises(ValueError, match="only in model.yaml"):
+        bind_manifest_ports(Empty(), _manifest(contract=None))
+
+    malformed_profiles = _manifest(direction="inputs", contract=None)
+    malformed_profiles["io"]["inputs"][0]["accepted_profiles"] = []
+    class InputModel(BioModule):
+        def inputs(self):
+            return {"sequence": SignalSpec.scalar(dtype="str", format="sequence")}
+
+        def outputs(self):
+            return {}
+
+    inputs, _ = bind_manifest_ports(InputModel(), malformed_profiles)
+    assert inputs["sequence"].format == "sequence"
+
+
+def test_file_and_yaml_error_paths(tmp_path: Path) -> None:
+    a3m_contract = {"profile": "protein.multiple-sequence-alignment/v1"}
+    cif_contract = {"profile": "protein-ligand.complex-structure-mmcif/v1"}
+    assert check_payload(a3m_contract, 42).status == "blocked"
+    assert check_payload(a3m_contract, str(tmp_path / "missing.a3m")).status == "blocked"
+    empty = tmp_path / "empty.a3m"
+    empty.write_text("", encoding="utf-8")
+    assert check_payload(a3m_contract, str(empty)).status == "blocked"
+    header_only = tmp_path / "header.a3m"
+    header_only.write_text(">query\n", encoding="utf-8")
+    assert check_payload(a3m_contract, str(header_only)).status == "blocked"
+    invalid_utf8 = tmp_path / "invalid.cif"
+    invalid_utf8.write_bytes(b"\xff")
+    assert check_payload(cif_contract, str(invalid_utf8)).status == "blocked"
+
+    not_mapping = tmp_path / "list.yaml"
+    not_mapping.write_text("- one\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="top level"):
+        load_yaml(not_mapping)
+    invalid_encoding = tmp_path / "bad.yaml"
+    invalid_encoding.write_bytes(b"\xff")
+    with pytest.raises(ValueError, match="invalid YAML"):
+        load_yaml(invalid_encoding)
+    too_large = tmp_path / "large.yaml"
+    too_large.write_bytes(b"x" * (4 * 1024 * 1024 + 1))
+    with pytest.raises(ValueError, match="4 MiB"):
+        load_yaml(too_large)
+
+
+def test_checker_registry_fails_closed(monkeypatch) -> None:
+    monkeypatch.delitem(compatibility_module._CHECKERS, "probability")
+    with pytest.raises(RuntimeError, match="probability"):
+        compatibility_module._validate_checker_registry()
+
+
+def test_remaining_smiles_and_manifest_safety_edges(monkeypatch) -> None:
+    assert check_payload(SMILES, 42).status == "blocked"
+    assert check_payload(SMILES, "").status == "blocked"
+    assert check_payload(SMILES, "C C").status == "blocked"
+    assert check_payload(SMILES, "C(").status == "blocked"
+
+    class FakeChem:
+        @staticmethod
+        def MolFromSmiles(value):
+            return None if value == "not-smiles" else object()
+
+    monkeypatch.setitem(__import__("sys").modules, "rdkit", type("RDKit", (), {"Chem": FakeChem}))
+    assert check_payload(SMILES, "CCO").status == "ok"
+    assert check_payload(SMILES, "not-smiles").status == "blocked"
+    assert validate_contract({"profile": " "}).status == "blocked"
+    assert validate_contract({"profile": "protein.sequence/v1", "species": ""}).status == "blocked"
+    assert validate_manifest({"compatibility": "bad"})[0]["code"] == "STANDARD_MISMATCH"

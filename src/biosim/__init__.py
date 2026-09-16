@@ -38,9 +38,8 @@ from .compatibility import (
     NO_SAMPLE,
     check_compatibility,
     check_payload,
+    compatibility_provenance,
     contract_digest,
-    register_checker,
-    registered_types,
 )
 from .visuals import VisualSpec, validate_visual_spec, normalize_visuals
 from .wiring import (
@@ -107,9 +106,8 @@ __all__ = [
     "NO_SAMPLE",
     "check_compatibility",
     "check_payload",
+    "compatibility_provenance",
     "contract_digest",
-    "register_checker",
-    "registered_types",
     "WiringBuilder",
     "build_from_spec",
     "load_wiring",
