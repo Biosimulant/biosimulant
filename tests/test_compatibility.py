@@ -33,7 +33,7 @@ from biosimulant_model_compatibility_standard import digest, get_bundle
 
 def _manifest() -> dict:
     bundle = get_bundle()
-    ref = "https://biosimulant.com/standards/model-compatibility/profiles/core/scalar-quantity/v0.1"
+    ref = "https://biosimulant.com/standards/model-compatibility/profiles/proteome/protein-sequence/v0.1"
     return {
         "schema_version": "2.0",
         "standard": "other",
@@ -51,8 +51,19 @@ def _manifest() -> dict:
                 "dtype": "float64",
                 "contract": {
                     "profile_refs": [ref],
-                    "semantic": {"concept": "concentration", "subject": "compound"},
-                    "representation": {"kind": "scalar"},
+                    "semantic": {
+                        "concept": "https://biosimulant.com/standards/model-compatibility/terms/proteome/protein-sequence"
+                    },
+                    "representation": {
+                        "kind": "scalar",
+                        "alphabet": "IUPAC-amino-acid",
+                        "encoding": "single-letter",
+                    },
+                    "identifiers": {
+                        "namespace": "UniProtKB",
+                        "namespace_version": "2026_03",
+                    },
+                    "biological_context": {"species": "NCBITaxon:9606"},
                 },
             }],
         },
@@ -97,10 +108,18 @@ def test_cli_validate_and_conformance(tmp_path: Path, capsys):
     main(["compatibility", "conformance"])
     result = json.loads(capsys.readouterr().out)
     profile_count = len(get_bundle().catalogue["profiles"])
+    fixture_count = sum(
+        len(
+            get_bundle().read_json(
+                f"fixtures/profiles/{profile['domain']}/{profile['name']}.json"
+            )["cases"]
+        )
+        for profile in get_bundle().catalogue["profiles"]
+    )
     assert profile_count > 0
     assert result["profiles"] == profile_count
-    assert result["profile_fixtures_passed"] == 3 * profile_count
-    assert result["release"] == "0.1.0-alpha.5"
+    assert result["profile_fixtures_passed"] == fixture_count
+    assert result["release"] == "0.0.1"
     assert result["ga_ready"] is False
     assert result["ga_blockers"]
 
@@ -180,7 +199,7 @@ def test_cli_inspection_compare_normalize_and_lock(tmp_path: Path, capsys):
         {"ref": snapshot["ref"], "sha256": snapshot["sha256"]}
     ]
 
-    main(["compatibility", "profiles", "list", "--domain", "core"])
+    main(["compatibility", "profiles", "list", "--domain", "proteome"])
     listed = json.loads(capsys.readouterr().out)
     assert listed["count"] > 0
     profile_ref = listed["profiles"][0]["ref"]

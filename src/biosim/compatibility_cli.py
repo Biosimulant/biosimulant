@@ -202,6 +202,7 @@ def _local_lab_plan(
         {"kind": "standard-bundle", "sha256": standard.get_bundle().digest},
     ]
     decisions: list[str] = []
+    technical_statuses: list[str] = []
     for edge_index, edge in enumerate(lab.get("wiring", [])):
         source_ref = edge.get("from")
         if not isinstance(source_ref, str):
@@ -217,7 +218,12 @@ def _local_lab_plan(
             # it declares would otherwise produce an ALLOWed edge. Check each side against its own
             # declared profiles first, and block the edge when it does not hold up.
             contract_findings = [
-                {"port": ref, "reason_code": finding.reason_code, "message": finding.message, "path": finding.path}
+                {
+                    "port": ref,
+                    "reason_code": finding.reason_code,
+                    "message": finding.message,
+                    "path": finding.path,
+                }
                 for contract, refs, ref in (
                     (source, source_refs, source_ref),
                     (target, target_refs, target_ref),
@@ -226,6 +232,7 @@ def _local_lab_plan(
                 for finding in standard.validate_contract(dict(contract), list(refs))
             ]
             if contract_findings:
+                technical_statuses.append("INCOMPATIBLE")
                 reports.append(
                     {
                         "edge_index": edge_index,
@@ -247,8 +254,14 @@ def _local_lab_plan(
                                 }
                                 for item in contract_findings
                             ],
-                            "source": {"contract_digest": None, "profile_refs": sorted(set(source_refs))},
-                            "target": {"contract_digest": None, "profile_refs": sorted(set(target_refs))},
+                            "source": {
+                                "contract_digest": None,
+                                "profile_refs": sorted(set(source_refs)),
+                            },
+                            "target": {
+                                "contract_digest": None,
+                                "profile_refs": sorted(set(target_refs)),
+                            },
                         },
                         "resolution": "UNRESOLVED",
                     }
@@ -275,6 +288,7 @@ def _local_lab_plan(
             )
             if resolution["resolution"] == "RESOLVED":
                 edge_plan = resolution["plan"]
+                technical_statuses.append(edge_plan["technical_status"])
                 prefix = f"edge-{edge_index}-{len(reports)}"
                 for node in edge_plan["nodes"]:
                     materialized_nodes.append({**node, "id": f"{prefix}-{node['id']}"})
@@ -291,6 +305,7 @@ def _local_lab_plan(
                 references.extend(edge_plan.get("immutable_references", []))
                 decisions.append(edge_plan["policy"]["decision"])
             else:
+                technical_statuses.append(report["status"])
                 decisions.append("BLOCK")
     decision = (
         "BLOCK"
@@ -299,10 +314,24 @@ def _local_lab_plan(
         if "APPROVAL_REQUIRED" in decisions
         else "ALLOW"
     )
+    status_rank = {
+        "EXACT": 0,
+        "DIRECT_COMPATIBLE": 1,
+        "LOSSLESS_CONVERSION_AVAILABLE": 2,
+        "CONDITIONAL": 3,
+        "LOSSY_CONVERSION_REQUIRES_APPROVAL": 4,
+        "INFERENCE_MODEL_REQUIRED": 5,
+        "UNKNOWN": 6,
+        "INCOMPATIBLE": 7,
+    }
+    technical_status = max(
+        technical_statuses or ["UNKNOWN"], key=status_rank.__getitem__
+    )
     plan_without_digest = {
         "schema_version": "0.1",
         "standard": "https://biosimulant.com/standards/model-compatibility/v0.1",
         "bundle_sha256": standard.get_bundle().digest,
+        "technical_status": technical_status,
         "nodes": materialized_nodes,
         "edges": materialized_edges,
         "reports": reports,
@@ -333,21 +362,44 @@ def _conformance() -> dict[str, Any]:
     for summary in profiles:
         fixture = bundle.read_json(f"fixtures/profiles/{summary['domain']}/{summary['name']}.json")
         profile_ref = fixture["profile_ref"]
-        positive, negative, unknown = fixture["cases"]
-        if standard.validate_contract(positive["contract"], [profile_ref]):
-            raise ValueError(f"Conformance failed for {profile_ref}: valid example was rejected")
-        negative_findings = standard.validate_contract(negative["contract"], [profile_ref])
-        if not any(item.reason_code == negative["reason_code"] for item in negative_findings):
-            raise ValueError(
-                f"Conformance failed for {profile_ref}: invalid example was not rejected "
-                f"with {negative['reason_code']}"
-            )
-        report = standard.compare_contracts(unknown["source"], unknown["target"], target_profile_refs=[profile_ref])
-        if report["status"] != "UNKNOWN":
-            raise ValueError(
-                f"Conformance failed for {profile_ref}: expected UNKNOWN, got {report['status']}"
-            )
-        passed += 3
+        for case in fixture["cases"]:
+            if "contract" in case:
+                findings = standard.validate_contract(case["contract"], [profile_ref])
+                valid = not findings
+                if valid != case["valid"]:
+                    raise ValueError(
+                        f"Conformance failed for {profile_ref}/{case['name']}: "
+                        f"expected valid={case['valid']}, got valid={valid}"
+                    )
+                reason_code = case.get("reason_code")
+                if reason_code and not any(
+                    item.reason_code == reason_code for item in findings
+                ):
+                    raise ValueError(
+                        f"Conformance failed for {profile_ref}/{case['name']}: "
+                        f"expected {reason_code}"
+                    )
+            else:
+                report = standard.compare_contracts(
+                    case["source"],
+                    case["target"],
+                    target_profile_refs=[profile_ref],
+                )
+                if report["status"] != case["status"]:
+                    raise ValueError(
+                        f"Conformance failed for {profile_ref}/{case['name']}: "
+                        f"expected {case['status']}, got {report['status']}"
+                    )
+                reason_code = case.get("reason_code")
+                if reason_code and not any(
+                    item["reason_code"] == reason_code
+                    for item in report.get("findings", [])
+                ):
+                    raise ValueError(
+                        f"Conformance failed for {profile_ref}/{case['name']}: "
+                        f"expected {reason_code}"
+                    )
+            passed += 1
     return {
         "valid": True,
         "release": bundle.manifest["release"],
