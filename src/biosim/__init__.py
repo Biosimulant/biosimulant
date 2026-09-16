@@ -32,6 +32,16 @@ from .signals import (
     validate_connection_specs,
     validate_port_spec_direction,
 )
+from .compatibility import (
+    CompatibilityIssue,
+    CompatibilityResult,
+    NO_SAMPLE,
+    check_compatibility,
+    check_payload,
+    contract_digest,
+    register_checker,
+    registered_types,
+)
 from .visuals import VisualSpec, validate_visual_spec, normalize_visuals
 from .wiring import (
     WiringBuilder,
@@ -92,6 +102,14 @@ __all__ = [
     "make_signal",
     "validate_connection_specs",
     "validate_port_spec_direction",
+    "CompatibilityIssue",
+    "CompatibilityResult",
+    "NO_SAMPLE",
+    "check_compatibility",
+    "check_payload",
+    "contract_digest",
+    "register_checker",
+    "registered_types",
     "WiringBuilder",
     "build_from_spec",
     "load_wiring",

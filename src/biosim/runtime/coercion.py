@@ -257,6 +257,16 @@ def _make_typed_signal(
             compatibility_envelope.validate_contract(signal_spec.contract)
         except ValueError as exc:
             _raise(error_cls, f"Input '{name}': SignalEnvelope doesn't fit this port: {exc}", exc)
+    if signal_spec.contract is not None:
+        from biosim.compatibility import check_payload, enforce_result
+
+        try:
+            enforce_result(
+                check_payload(signal_spec.contract, value),
+                context=f"Input '{name}'",
+            )
+        except ValueError as exc:
+            _raise(error_cls, str(exc), exc)
     signal = signal_cls(
         source=source, name=name, value=value, emitted_at=emitted_at, spec=signal_spec
     )

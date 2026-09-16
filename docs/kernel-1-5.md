@@ -58,13 +58,21 @@ Each signal binds a `SignalSpec` carrying:
 - `dtype`
 - `shape`
 - `emitted_unit` on outputs
+- `accepted_units` on simple inputs
 - `accepted_profiles` on inputs
+- `format`
+- optional semantic `contract`
 - `interpolation`
 - `max_age`
 - `stale_policy`
 - optional record/event schema
 
-The kernel only validates compatibility. It does not convert units or reinterpret payload types. Outputs declare one emitted profile; inputs may declare multiple accepted profiles, each with its own `signal_type`, `dtype`, `shape`, `schema`, and accepted units.
+The kernel validates compatibility but does not convert units or reinterpret
+payload types. Outputs declare an emitted unit; inputs list units they accept
+directly. Inputs may still use multiple accepted profiles when they genuinely
+accept different structural representations. Small semantic contracts and
+registered Python checkers add species-, identifier- and value-aware checks
+without a separate profile catalogue.
 
 ## Snapshot and branch
 

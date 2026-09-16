@@ -1,353 +1,402 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 from zipfile import ZipFile
 
-import yaml
-
 import pytest
+import yaml
 
 from biosim import (
     AcceptedSignalProfile,
     BioModule,
     BioWorld,
+    CompatibilityIssue,
+    CompatibilityResult,
     ExecutionContext,
     SignalEnvelope,
     SignalSpec,
+    check_compatibility,
+    check_payload,
+    contract_digest,
+    register_checker,
+    registered_types,
+    validate_port_spec_direction,
 )
 from biosim.__main__ import main
+from biosim.compatibility import bind_manifest_ports, load_yaml, validate_manifest
 from biosim.compatibility import (
-    bind_manifest_ports,
-    build_lock,
-    compare_contracts,
-    load_yaml,
-    lock_bytes,
-    normalize_manifest,
-    resolve_contracts,
-    validate_manifest,
+    enforce_result,
+    manifest_has_compatibility_declarations,
+    validate_contract,
 )
 from biosim.pack import build_package
-from biosimulant_model_compatibility_standard import digest, get_bundle
 
 
-def _manifest() -> dict:
-    bundle = get_bundle()
-    ref = "https://biosimulant.com/standards/model-compatibility/profiles/proteome/protein-sequence/v0.1"
+SMILES_CONTRACT = {"type": "chemical.smiles"}
+SEQUENCE_CONTRACT = {
+    "type": "protein.sequence",
+    "species": "NCBITaxon:9606",
+    "identifier_namespace": "UniProtKB",
+}
+
+
+def _port_manifest() -> dict:
     return {
         "schema_version": "2.0",
         "standard": "other",
         "title": "Compatibility example",
         "biosim": {"entrypoint": "src.model:Model"},
-        "compatibility": {
-            "standard": "https://biosimulant.com/standards/model-compatibility/v0.1",
-            "profiles": [{"ref": ref, "sha256": bundle.profile_index[ref]["sha256"]}],
-        },
         "io": {
             "inputs": [],
-            "outputs": [{
-                "name": "quantity",
-                "signal_type": "scalar",
-                "dtype": "float64",
-                "contract": {
-                    "profile_refs": [ref],
-                    "semantic": {
-                        "concept": "https://biosimulant.com/standards/model-compatibility/terms/proteome/protein-sequence"
-                    },
-                    "representation": {
-                        "kind": "scalar",
-                        "alphabet": "IUPAC-amino-acid",
-                        "encoding": "single-letter",
-                    },
-                    "identifiers": {
-                        "namespace": "UniProtKB",
-                        "namespace_version": "2026_03",
-                    },
-                    "biological_context": {"species": "NCBITaxon:9606"},
-                },
-            }],
+            "outputs": [
+                {
+                    "name": "sequence",
+                    "signal_type": "scalar",
+                    "dtype": "str",
+                    "format": "iupac-amino-acid",
+                    "contract": copy.deepcopy(SEQUENCE_CONTRACT),
+                }
+            ],
         },
     }
 
 
-def test_signal_spec_and_accepted_profile_preserve_contract_round_trip():
-    refinement = {"representation": {"kind": "dense_vector"}}
-    profile = AcceptedSignalProfile(signal_type="array", dtype="float64", shape=(2,), contract=refinement)
-    spec = SignalSpec.array(
-        dtype="float32",
-        shape=(2,),
-        contract={"semantic": {"concept": "gene_expression"}},
-        accepted_profiles=[profile],
+def test_signal_spec_round_trip_keeps_simple_compatibility_facts() -> None:
+    spec = SignalSpec.scalar(
+        dtype="float64",
+        accepted_units=("nM", "uM"),
+        format="number",
+        contract={"type": "measurement.concentration", "species": "any"},
     )
     assert SignalSpec.from_dict(spec.to_dict()).to_dict() == spec.to_dict()
-    assert spec.to_dict()["accepted_profiles"][0]["contract"] == refinement
 
-
-def test_package_build_adds_lock_without_rewriting_source(tmp_path: Path):
-    source = tmp_path / "model"
-    (source / "src").mkdir(parents=True)
-    manifest = _manifest()
-    original = yaml.safe_dump(manifest, sort_keys=False)
-    (source / "model.yaml").write_text(original, encoding="utf-8")
-    (source / "src" / "model.py").write_text("class Model:\n    pass\n", encoding="utf-8")
-
-    package = build_package(source)
-    assert (source / "model.yaml").read_text(encoding="utf-8") == original
-    with ZipFile(package) as archive:
-        lock = json.loads(archive.read("payload/compatibility.lock.json"))
-    assert lock["bundle_sha256"] == get_bundle().digest
-    assert lock["contracts"][0]["port"] == "quantity"
-
-
-def test_cli_validate_and_conformance(tmp_path: Path, capsys):
-    manifest = tmp_path / "model.yaml"
-    manifest.write_text(yaml.safe_dump(_manifest(), sort_keys=False), encoding="utf-8")
-    main(["compatibility", "validate", str(manifest)])
-    assert json.loads(capsys.readouterr().out)["valid"] is True
-
-    main(["compatibility", "conformance"])
-    result = json.loads(capsys.readouterr().out)
-    profile_count = len(get_bundle().catalogue["profiles"])
-    fixture_count = sum(
-        len(
-            get_bundle().read_json(
-                f"fixtures/profiles/{profile['domain']}/{profile['name']}.json"
-            )["cases"]
-        )
-        for profile in get_bundle().catalogue["profiles"]
+    ambiguous = SignalSpec.scalar(
+        accepted_units=("nM",),
+        accepted_profiles=(AcceptedSignalProfile(signal_type="scalar"),),
     )
-    assert profile_count > 0
-    assert result["profiles"] == profile_count
-    assert result["profile_fixtures_passed"] == fixture_count
-    assert result["release"] == "0.0.1"
-    assert result["catalogue_status"] == "active"
+    with pytest.raises(ValueError, match="accepted_units or accepted_profiles"):
+        validate_port_spec_direction(ambiguous, direction="input")
 
 
-def test_compatibility_wrappers_keep_legacy_optional_and_execute_opt_in():
-    legacy = {"schema_version": "2.0", "io": {"inputs": [], "outputs": []}}
-    assert validate_manifest(legacy) == []
-    assert normalize_manifest(legacy) == legacy
-    assert build_lock(legacy) is None
-    assert lock_bytes(legacy) is None
-
-    manifest = _manifest()
-    assert validate_manifest(manifest) == []
-    normalized = normalize_manifest(manifest)
-    assert normalized["compatibility"]["standard"].endswith("/v0.1")
-    lock = build_lock(manifest)
-    assert lock is not None
-    assert json.loads(lock_bytes(manifest))["digest"] == lock["digest"]
-
-    contract = manifest["io"]["outputs"][0]["contract"]
-    assert compare_contracts(contract, contract)["status"] == "EXACT"
-    assert resolve_contracts(contract, contract)["resolution"] == "RESOLVED"
-    assert resolve_contracts(None, contract)["reason"] == "UNKNOWN_CONTRACT"
-
-
-def test_cli_inspection_compare_normalize_and_lock(tmp_path: Path, capsys):
-    manifest_path = tmp_path / "model.yaml"
-    manifest_path.write_text(
-        yaml.safe_dump(_manifest(), sort_keys=False), encoding="utf-8"
+def test_static_checks_cover_semantics_species_namespace_format_and_units() -> None:
+    source = SignalSpec.scalar(
+        dtype="str",
+        format="iupac-amino-acid",
+        contract=SEQUENCE_CONTRACT,
     )
-
-    normalized_path = tmp_path / "normalized.json"
-    main(
-        [
-            "compatibility",
-            "normalize",
-            str(manifest_path),
-            "--output",
-            str(normalized_path),
-        ]
+    target = SignalSpec.scalar(
+        dtype="str",
+        format="iupac-amino-acid",
+        contract=SEQUENCE_CONTRACT,
     )
-    assert json.loads(normalized_path.read_text())["compatibility"]
+    assert check_compatibility(source, target).status == "ok"
 
-    consumer = _manifest()
-    consumer["io"]["inputs"] = [
-        {
-            "name": "quantity",
-            "signal_type": "scalar",
-            "dtype": "float64",
-            "contract": consumer["io"]["outputs"][0]["contract"],
-        }
-    ]
-    consumer_path = tmp_path / "consumer.yaml"
-    consumer_path.write_text(
-        yaml.safe_dump(consumer, sort_keys=False), encoding="utf-8"
+    mouse = SignalSpec.scalar(
+        dtype="str",
+        format="iupac-amino-acid",
+        contract={**SEQUENCE_CONTRACT, "species": "NCBITaxon:10090"},
     )
-    snapshot_unsigned = {
-        "ref": "https://biosimulant.com/snapshots/example-ontology/v1",
-        "equivalences": [],
-    }
-    snapshot = {**snapshot_unsigned, "sha256": digest(snapshot_unsigned)}
-    snapshots_path = tmp_path / "ontology-snapshots.json"
-    snapshots_path.write_text(json.dumps([snapshot]), encoding="utf-8")
-    main(
-        [
-            "compatibility",
-            "compare",
-            f"{manifest_path}#outputs.quantity",
-            f"{consumer_path}#inputs.quantity",
-            "--ontology-snapshots",
-            str(snapshots_path),
-        ]
+    result = check_compatibility(mouse, target)
+    assert result.status == "blocked"
+    assert result.issues[-1].code == "SPECIES_MISMATCH"
+
+    wrong_format = SignalSpec.scalar(
+        dtype="str",
+        format="fasta",
+        contract=SEQUENCE_CONTRACT,
     )
-    report = json.loads(capsys.readouterr().out)
-    assert report["status"] == "EXACT"
-    assert report["snapshots"]["ontology"] == [
-        {"ref": snapshot["ref"], "sha256": snapshot["sha256"]}
-    ]
+    assert check_compatibility(wrong_format, target).status == "blocked"
 
-    main(["compatibility", "profiles", "list", "--domain", "proteome"])
-    listed = json.loads(capsys.readouterr().out)
-    assert listed["count"] > 0
-    profile_ref = listed["profiles"][0]["ref"]
-    main(["compatibility", "profiles", "show", profile_ref])
-    assert json.loads(capsys.readouterr().out)["$id"] == profile_ref
-
-    lock_path = tmp_path / "inspectable.lock.json"
-    main(
-        [
-            "compatibility",
-            "lock",
-            str(manifest_path),
-            "--output",
-            str(lock_path),
-        ]
+    concentration = {"type": "measurement.concentration"}
+    nm = SignalSpec.scalar(dtype="float64", emitted_unit="nM", contract=concentration)
+    kcal_target = SignalSpec.scalar(
+        dtype="float64",
+        accepted_units=("kcal/mol",),
+        contract=concentration,
     )
-    lock_result = json.loads(capsys.readouterr().out)
-    assert lock_result["output"] == str(lock_path)
-    assert json.loads(lock_path.read_text())["digest"] == lock_result["digest"]
+    assert check_compatibility(nm, kcal_target).status == "blocked"
 
 
-def _cli_error(capsys, argv: list[str]) -> str:
-    """Run a compatibility command that should fail and return its stderr."""
-    with pytest.raises(SystemExit) as raised:
-        main(["compatibility", *argv])
-    assert raised.value.code == 2
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err.startswith("error: ")
-    return captured.err
+def test_missing_declaration_warns_instead_of_guessing() -> None:
+    source = SignalSpec.scalar(dtype="str")
+    target = SignalSpec.scalar(dtype="str", contract=SMILES_CONTRACT)
+    result = check_compatibility(source, target)
+    assert result.status == "warning"
+    assert result.issues[0].code == "SOURCE_UNDECLARED"
+
+    unimplemented = {"type": "example.unimplemented"}
+    generic = SignalSpec.scalar(dtype="float64", contract=unimplemented)
+    result = check_compatibility(generic, generic)
+    assert result.status == "warning"
+    assert result.issues[-1].code == "CHECKER_UNAVAILABLE"
 
 
-def test_cli_and_yaml_errors_are_explicit(tmp_path: Path, capsys):
-    invalid_yaml = tmp_path / "invalid.yaml"
-    invalid_yaml.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="top level must be a YAML mapping"):
-        load_yaml(invalid_yaml)
-    assert "top level must be a YAML mapping" in _cli_error(
-        capsys, ["validate", str(invalid_yaml)]
+def test_value_checks_reject_reaction_smiles_and_invalid_sequences() -> None:
+    smiles = check_payload(SMILES_CONTRACT, "CCO>>CC=O")
+    assert smiles.status == "blocked"
+    assert any(issue.code == "REACTION_SMILES" for issue in smiles.issues)
+
+    sequence = check_payload(SEQUENCE_CONTRACT, "ACD1")
+    assert sequence.status == "blocked"
+    assert sequence.issues[-1].code == "INVALID_SEQUENCE_CHARACTER"
+
+
+def test_builtin_checkers_cover_supported_carriers_and_parser_results(monkeypatch) -> None:
+    fake_chem = SimpleNamespace(
+        MolFromSmiles=lambda value: None if value == "not-smiles" else object()
     )
+    monkeypatch.setitem(sys.modules, "rdkit", SimpleNamespace(Chem=fake_chem))
 
-    legacy = tmp_path / "legacy.yaml"
-    legacy.write_text("schema_version: '2.0'\n", encoding="utf-8")
-    assert "has no `compatibility` block" in _cli_error(capsys, ["lock", str(legacy)])
+    assert check_payload(SMILES_CONTRACT, "CCO").status == "ok"
+    assert check_payload(SMILES_CONTRACT, {"smiles": "CCO"}).status == "ok"
+    assert check_payload(SMILES_CONTRACT, ["CCO", "CCN"]).status == "ok"
+    assert check_payload(SMILES_CONTRACT, "not-smiles").issues[-1].code == "UNPARSEABLE_SMILES"
+    assert check_payload(SMILES_CONTRACT, "").issues[-1].code == "EMPTY_SMILES"
+    assert check_payload(SMILES_CONTRACT, "C C").issues[-1].code == "SMILES_WHITESPACE"
+    assert check_payload(SMILES_CONTRACT, "C(").issues[-1].code == "UNBALANCED_SMILES"
+    assert check_payload(SMILES_CONTRACT, 42).issues[-1].code == "INVALID_VALUE_CARRIER"
 
-    assert "Point to a port like model.yaml#outputs." in _cli_error(
-        capsys, ["compare", str(legacy), str(legacy)]
-    )
+    assert check_payload(SEQUENCE_CONTRACT, {"sequence": "ACDE"}).status == "ok"
+    assert check_payload(SEQUENCE_CONTRACT, ["ACD", "EFG"]).status == "ok"
+    assert check_payload(SEQUENCE_CONTRACT, "").issues[-1].code == "EMPTY_SEQUENCE"
+    assert check_payload(SEQUENCE_CONTRACT, 42).issues[-1].code == "INVALID_VALUE_CARRIER"
 
-    assert "No output port named 'x'" in _cli_error(
-        capsys, ["compare", f"{legacy}#outputs.x", f"{legacy}#outputs.x"]
-    )
-
-    producer = tmp_path / "producer.yaml"
-    producer.write_text(yaml.safe_dump(_manifest()), encoding="utf-8")
-    assert "The target must be an input port" in _cli_error(
-        capsys, ["compare", f"{producer}#outputs.quantity", f"{legacy}#outputs.x"]
-    )
-
-    missing = tmp_path / "missing.yaml"
-    assert str(missing) in _cli_error(capsys, ["validate", str(missing)])
-
-    broken_yaml = tmp_path / "broken.yaml"
-    broken_yaml.write_text("io: [unclosed\n", encoding="utf-8")
-    assert "invalid YAML" in _cli_error(capsys, ["validate", str(broken_yaml)])
-
-    assert "Unknown profile 'not-a-profile'" in _cli_error(
-        capsys, ["profiles", "show", "not-a-profile"]
-    )
+    structure = {"type": "protein.structure"}
+    assert check_payload(structure, "ATOM").status == "ok"
+    assert check_payload(structure, None).status == "blocked"
 
 
-def test_manifest_port_shape_and_profile_contradictions_are_explicit():
-    manifest = _manifest()
-    manifest["io"]["inputs"] = [
-        {
-            "name": "dose",
-            "signal_type": "scalar",
-            "dtype": "float64",
-            "accepted_profiles": [{"dtype": "float32"}],
-        }
-    ]
-    with pytest.raises(ValueError, match="lists 1 accepted profile"):
-        bind_manifest_ports(_ContractBoundModel(), manifest)
+def test_yaml_loader_rejects_invalid_encoding_syntax_and_large_files(
+    tmp_path: Path,
+) -> None:
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("io: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid YAML"):
+        load_yaml(broken)
 
-    malformed = {"io": {"inputs": "not-a-list", "outputs": []}}
-    with pytest.raises(ValueError, match="must be a list"):
-        bind_manifest_ports(_ContractBoundModel(), malformed)
+    invalid_encoding = tmp_path / "invalid-encoding.yaml"
+    invalid_encoding.write_bytes(b"\xff")
+    with pytest.raises(ValueError, match="invalid YAML"):
+        load_yaml(invalid_encoding)
 
-    duplicate = {
-        "io": {
-            "inputs": [
-                {"name": "dose", "signal_type": "scalar", "dtype": "float64"},
-                {"name": "dose", "signal_type": "scalar", "dtype": "float64"},
-            ],
-            "outputs": [{"name": "quantity"}],
-        }
-    }
-    with pytest.raises(ValueError, match="lists port 'dose' more than once"):
-        bind_manifest_ports(_ContractBoundModel(), duplicate)
+    large = tmp_path / "large.yaml"
+    large.write_bytes(b"x" * (4 * 1024 * 1024 + 1))
+    with pytest.raises(ValueError, match="4 MiB"):
+        load_yaml(large)
 
 
-def test_manifest_profile_refinement_is_bound_and_bad_ports_fail():
-    class AcceptedModel(BioModule):
-        def inputs(self):
-            return {
-                "dose": SignalSpec.scalar(
-                    dtype="float64",
-                    accepted_profiles=[
-                        AcceptedSignalProfile(
-                            signal_type="scalar",
-                            dtype="float32",
-                            accepted_units=("nM", "uM"),
-                        )
-                    ],
+def test_model_can_register_a_namespaced_type_checker() -> None:
+    def check_score(source, target, sample):
+        if sample is not None and not 0 <= sample <= 1:
+            return [
+                CompatibilityIssue(
+                    level="blocked",
+                    code="SCORE_RANGE",
+                    message="The score must be between zero and one.",
                 )
-            }
+            ]
+        return []
 
-        def outputs(self):
-            return {}
+    register_checker("example.test_score", check_score)
+    assert "example.test_score" in registered_types()
+    contract = {"type": "example.test_score"}
+    spec = SignalSpec.scalar(dtype="float64", contract=contract)
+    assert check_compatibility(spec, spec, sample=1.5).status == "blocked"
 
-    refinement = {"measurement": {"unit": "nM"}}
+
+def test_checker_registration_and_result_validation_edges() -> None:
+    for kwargs, message in (
+        ({"level": "ok", "code": "X", "message": "x"}, "level"),
+        ({"level": "warning", "code": "X", "message": ""}, "message"),
+        ({"level": "warning", "code": "", "message": "x"}, "code"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            CompatibilityIssue(**kwargs)
+
+    with pytest.raises(ValueError, match="dotted name"):
+        register_checker("not_dotted", lambda source, target, sample: [])
+    with pytest.raises(TypeError, match="callable"):
+        register_checker("example.not_callable", object())
+
+    warning = CompatibilityIssue(
+        level="warning", code="EXAMPLE_WARNING", message="Needs a closer look."
+    )
+    register_checker(
+        "example.result_object",
+        lambda source, target, sample: CompatibilityResult((warning,)),
+    )
+    contract = {"type": "example.result_object"}
+    assert check_payload(contract, 1).issues == (warning,)
+    with pytest.raises(ValueError, match="already registered"):
+        register_checker("example.result_object", lambda source, target, sample: [])
+    register_checker(
+        "example.result_object",
+        lambda source, target, sample: [],
+        replace=True,
+    )
+    assert check_payload(contract, 1).status == "ok"
+
+    register_checker("example.bad_return", lambda source, target, sample: ["bad"])
+    assert check_payload({"type": "example.bad_return"}, 1).issues[0].code == "CHECKER_FAILED"
+
+    def broken(source, target, sample):
+        raise RuntimeError("broken checker")
+
+    register_checker("example.broken", broken)
+    result = check_payload({"type": "example.broken"}, 1)
+    assert result.status == "blocked"
+    assert "broken checker" in result.issues[0].message
+
+
+def test_contract_validation_and_all_generic_comparison_outcomes() -> None:
+    assert validate_contract(None).status == "ok"
+    assert validate_contract("bad").issues[0].code == "INVALID_CONTRACT"
+    assert validate_contract({}).issues[0].code == "MISSING_TYPE"
+    assert validate_contract({"type": "protein"}).issues[0].code == "INVALID_TYPE"
+    invalid_context = validate_contract(
+        {
+            "type": "protein.sequence",
+            "species": "",
+            "identifier_namespace": 42,
+        }
+    )
+    assert {issue.code for issue in invalid_context.issues} == {
+        "INVALID_SPECIES",
+        "INVALID_IDENTIFIER_NAMESPACE",
+    }
+    assert check_payload(None, "anything").status == "ok"
+
+    protein = SignalSpec.scalar(dtype="str", contract={"type": "protein.sequence"})
+    smiles = SignalSpec.scalar(dtype="str", contract={"type": "chemical.smiles"})
+    assert check_compatibility(protein, smiles).issues[0].code == "TYPE_MISMATCH"
+    assert check_compatibility(protein, SignalSpec.scalar(dtype="str")).issues[0].code == "TARGET_UNDECLARED"
+
+    target = SignalSpec.scalar(
+        dtype="str",
+        contract={
+            "type": "protein.sequence",
+            "species": "NCBITaxon:9606",
+            "identifier_namespace": "UniProtKB",
+        },
+    )
+    source = SignalSpec.scalar(
+        dtype="str",
+        contract={"type": "protein.sequence", "species": "any"},
+    )
+    issues = check_compatibility(source, target).issues
+    assert {issue.code for issue in issues} == {
+        "SPECIES_UNDECLARED",
+        "IDENTIFIER_NAMESPACE_UNDECLARED",
+    }
+
+    wrong_namespace = SignalSpec.scalar(
+        dtype="str",
+        contract={
+            "type": "protein.sequence",
+            "species": "NCBITaxon:9606",
+            "identifier_namespace": "RefSeq",
+        },
+    )
+    assert any(
+        issue.code == "IDENTIFIER_NAMESPACE_MISMATCH"
+        for issue in check_compatibility(wrong_namespace, target).issues
+    )
+
+    event = SignalSpec.event(contract={"type": "protein.sequence"})
+    assert check_compatibility(event, target).issues[0].code == "SIGNAL_KIND_MISMATCH"
+
+    blocked = CompatibilityResult(
+        (CompatibilityIssue("blocked", "Stop.", "STOP"),)
+    )
+    with pytest.raises(ValueError, match="context: Stop"):
+        enforce_result(blocked, context="context")
+
+
+def test_manifest_validation_rejects_old_block_and_unknown_contract_fields() -> None:
+    old = _port_manifest()
+    old["compatibility"] = {"standard": "old"}
+    findings = validate_manifest(old)
+    assert findings[0]["code"] == "LEGACY_COMPATIBILITY_BLOCK"
+
+    invalid = _port_manifest()
+    invalid["io"]["outputs"][0]["contract"]["profile_refs"] = []
+    findings = validate_manifest(invalid)
+    assert any(item["code"] == "UNKNOWN_CONTRACT_FIELD" for item in findings)
+
+
+def test_manifest_validation_reports_each_malformed_shape() -> None:
+    assert validate_manifest({}) == []
+    assert validate_manifest({"io": "bad"})[0]["code"] == "INVALID_IO"
+    assert validate_manifest({"io": {"inputs": "bad"}})[0]["code"] == "INVALID_PORTS"
+
     manifest = {
         "io": {
             "inputs": [
+                42,
+                {"name": ""},
+                {"name": "x"},
+                {"name": "x", "accepted_profiles": "bad"},
+                {"name": "y", "accepted_profiles": [42]},
                 {
-                    "name": "dose",
-                    "signal_type": "scalar",
-                    "dtype": "float64",
+                    "name": "z",
                     "accepted_profiles": [
-                        {
-                            "signal_type": "scalar",
-                            "dtype": "float32",
-                            "accepted_units": ["nM", "uM"],
-                            "contract": refinement,
-                        }
+                        {"contract": {"type": "not-dotted"}}
                     ],
-                }
+                },
+                {"name": "none", "accepted_profiles": None},
             ],
             "outputs": [],
         }
     }
-    inputs, _ = bind_manifest_ports(AcceptedModel(), manifest)
-    assert inputs["dose"].accepted_profiles[0].contract == refinement
+    codes = {item["code"] for item in validate_manifest(manifest)}
+    assert {
+        "INVALID_PORT",
+        "INVALID_PORT_NAME",
+        "DUPLICATE_PORT_NAME",
+        "INVALID_ACCEPTED_PROFILES",
+        "INVALID_ACCEPTED_PROFILE",
+        "INVALID_TYPE",
+    } <= codes
 
-    for bad_port, message in ((42, "must be a mapping"), ({"name": ""}, "non-empty")):
+    assert manifest_has_compatibility_declarations({}) is False
+    assert manifest_has_compatibility_declarations({"io": "bad"}) is False
+    assert (
+        manifest_has_compatibility_declarations(
+            {"io": {"inputs": "bad", "outputs": [42]}}
+        )
+        is False
+    )
+    assert (
+        manifest_has_compatibility_declarations(
+            {"io": {"inputs": [{"name": "x", "accepted_units": ["nM"]}]}}
+        )
+        is True
+    )
+
+
+def test_manifest_binding_reports_port_and_profile_errors() -> None:
+    class EmptyModel(BioModule):
+        def inputs(self):
+            return {}
+
+        def outputs(self):
+            return {}
+
+    for manifest, message in (
+        ({"io": {"inputs": "bad", "outputs": []}}, "must be a list"),
+        ({"io": {"inputs": [42], "outputs": []}}, "must be a mapping"),
+        ({"io": {"inputs": [{"name": ""}], "outputs": []}}, "non-empty"),
+        (
+            {"io": {"inputs": [{"name": "x"}, {"name": "x"}], "outputs": []}},
+            "more than once",
+        ),
+    ):
         with pytest.raises(ValueError, match=message):
-            bind_manifest_ports(
-                AcceptedModel(), {"io": {"inputs": [bad_port], "outputs": []}}
-            )
+            bind_manifest_ports(EmptyModel(), manifest)
 
     class NonMappingModel(BioModule):
         def inputs(self):
@@ -356,202 +405,304 @@ def test_manifest_profile_refinement_is_bound_and_bad_ports_fail():
         def outputs(self):
             return {}
 
-    with pytest.raises(ValueError, match="must each return a dict"):
-        bind_manifest_ports(NonMappingModel(), manifest)
+    with pytest.raises(ValueError, match="return a dict"):
+        bind_manifest_ports(NonMappingModel(), {"io": {"inputs": [], "outputs": []}})
+
+    class ProfileModel(BioModule):
+        def inputs(self):
+            return {
+                "dose": SignalSpec.scalar(
+                    dtype="float64",
+                    accepted_profiles=(
+                        AcceptedSignalProfile(
+                            signal_type="scalar",
+                            dtype="float32",
+                            accepted_units=("nM",),
+                            format="number",
+                            contract={"type": "measurement.concentration"},
+                        ),
+                    ),
+                )
+            }
+
+        def outputs(self):
+            return {}
+
+    base_profile = {
+        "signal_type": "scalar",
+        "dtype": "float32",
+        "accepted_units": ["nM"],
+        "format": "number",
+        "contract": {"type": "measurement.concentration"},
+    }
+    manifest = {
+        "io": {
+            "inputs": [
+                {
+                    "name": "dose",
+                    "signal_type": "scalar",
+                    "dtype": "float64",
+                    "accepted_profiles": [base_profile],
+                }
+            ],
+            "outputs": [],
+        }
+    }
+    inputs, _ = bind_manifest_ports(ProfileModel(), manifest)
+    assert inputs["dose"].accepted_profiles[0].format == "number"
+
+    conflict = copy.deepcopy(manifest)
+    conflict["io"]["inputs"][0]["accepted_profiles"][0]["contract"] = {
+        "type": "measurement.affinity"
+    }
+    with pytest.raises(ValueError, match="contract differs"):
+        bind_manifest_ports(ProfileModel(), conflict)
+
+    missing_profiles = copy.deepcopy(manifest)
+    missing_profiles["io"]["inputs"][0]["accepted_profiles"] = [base_profile, base_profile]
+    with pytest.raises(ValueError, match="lists 2 accepted profile"):
+        bind_manifest_ports(ProfileModel(), missing_profiles)
+
+    malformed_profile = copy.deepcopy(manifest)
+    malformed_profile["io"]["inputs"][0]["accepted_profiles"] = [42]
+    with pytest.raises(ValueError, match="must be a mapping"):
+        bind_manifest_ports(ProfileModel(), malformed_profile)
+
+    class NoProfileModel(BioModule):
+        def inputs(self):
+            return {"dose": SignalSpec.scalar(dtype="float64")}
+
+        def outputs(self):
+            return {}
+
+    with pytest.raises(ValueError, match="lists 1 accepted profile"):
+        bind_manifest_ports(NoProfileModel(), copy.deepcopy(manifest))
+
+    nonlist_profiles = copy.deepcopy(manifest)
+    nonlist_profiles["io"]["inputs"][0]["accepted_profiles"] = "bad"
+    with pytest.raises(ValueError, match="must be a list"):
+        bind_manifest_ports(ProfileModel(), nonlist_profiles)
+
+    wrong_format = copy.deepcopy(manifest)
+    wrong_format["io"]["inputs"][0]["accepted_profiles"][0]["format"] = "text"
+    with pytest.raises(ValueError, match=r"\.format is"):
+        bind_manifest_ports(ProfileModel(), wrong_format)
+
+    class OutputProfileModel(BioModule):
+        def inputs(self):
+            return {}
+
+        def outputs(self):
+            return {
+                "x": SignalSpec.scalar(
+                    accepted_profiles=(AcceptedSignalProfile(signal_type="scalar"),)
+                )
+            }
+
+    with pytest.raises(ValueError, match="only valid on inputs"):
+        bind_manifest_ports(
+            OutputProfileModel(),
+            {
+                "io": {
+                    "inputs": [],
+                    "outputs": [
+                        {
+                            "name": "x",
+                            "signal_type": "scalar",
+                            "accepted_profiles": [{"signal_type": "scalar"}],
+                        }
+                    ],
+                }
+            },
+        )
 
 
 class _ContractBoundModel(BioModule):
     execution_policy = "each_window"
 
     def inputs(self):
-        return {"dose": SignalSpec.scalar(dtype="float64")}
+        return {
+            "dose": SignalSpec.scalar(
+                dtype="float64",
+                accepted_units=("nM",),
+            )
+        }
 
     def outputs(self):
-        return {"quantity": SignalSpec.scalar(dtype="float64")}
+        return {
+            "sequence": SignalSpec.scalar(
+                dtype="str",
+                format="iupac-amino-acid",
+            )
+        }
 
     def execute(self, inputs, *, context: ExecutionContext):
-        return {"quantity": 1.0}
+        return {"sequence": "ACDE"}
 
 
-def test_opted_in_manifest_contract_is_bound_to_runtime_specs():
-    manifest = _manifest()
-    manifest["io"]["inputs"] = [{
-        "name": "dose",
-        "signal_type": "scalar",
-        "dtype": "float64",
-        "contract": {"semantic": {"concept": "dose"}},
-    }]
+def test_manifest_contracts_bind_to_runtime_specs() -> None:
+    manifest = _port_manifest()
+    manifest["io"]["inputs"] = [
+        {
+            "name": "dose",
+            "signal_type": "scalar",
+            "dtype": "float64",
+            "accepted_units": ["nM"],
+            "contract": {"type": "measurement.concentration"},
+        }
+    ]
     model = _ContractBoundModel()
     inputs, outputs = bind_manifest_ports(model, manifest)
-    assert inputs["dose"].contract == {"semantic": {"concept": "dose"}}
-    assert outputs["quantity"].contract == manifest["io"]["outputs"][0]["contract"]
+    assert inputs["dose"].contract == {"type": "measurement.concentration"}
+    assert outputs["sequence"].contract == SEQUENCE_CONTRACT
 
     world = BioWorld(communication_step=1.0)
     world.add_biomodule("model", model)
-    assert world._modules["model"].input_specs["dose"].contract == inputs["dose"].contract
+    assert world._modules["model"].output_specs["sequence"].contract == SEQUENCE_CONTRACT
 
 
-def test_opted_in_manifest_python_contradiction_is_rejected():
-    manifest = _manifest()
-    manifest["io"]["inputs"] = [{
-        "name": "dose",
-        "signal_type": "array",
-        "dtype": "float64",
-        "shape": [2],
-    }]
-    with pytest.raises(
-        ValueError, match="is 'array' in model.yaml but 'scalar' in the Python module"
-    ):
-        bind_manifest_ports(_ContractBoundModel(), manifest)
+def test_manifest_and_python_contracts_cannot_disagree() -> None:
+    class ConflictingModel(_ContractBoundModel):
+        def outputs(self):
+            return {
+                "sequence": SignalSpec.scalar(
+                    dtype="str",
+                    format="iupac-amino-acid",
+                    contract={**SEQUENCE_CONTRACT, "species": "NCBITaxon:10090"},
+                )
+            }
+
+    manifest = _port_manifest()
+    manifest["io"]["inputs"] = [
+        {
+            "name": "dose",
+            "signal_type": "scalar",
+            "dtype": "float64",
+            "accepted_units": ["nM"],
+        }
+    ]
+    with pytest.raises(ValueError, match="contract differs"):
+        bind_manifest_ports(ConflictingModel(), manifest)
 
 
-def test_legacy_module_is_not_implicitly_bound():
-    model = _ContractBoundModel()
-    world = BioWorld(communication_step=1.0)
-    world.add_biomodule("model", model)
-    assert world._modules["model"].input_specs["dose"].contract is None
-
-
-def test_cli_plan_materializes_a_schema_valid_direct_edge(tmp_path: Path, capsys):
-    contract = {"semantic": {"concept": "concentration", "subject": "compound"}}
-    producer = tmp_path / "producer"
-    consumer = tmp_path / "consumer"
-    producer.mkdir()
-    consumer.mkdir()
-    (producer / "model.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "schema_version": "2.0",
-                "io": {"inputs": [], "outputs": [{"name": "x", "contract": contract}]},
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
+def test_package_keeps_port_contract_without_generating_a_compatibility_lock(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "model"
+    (source / "src").mkdir(parents=True)
+    manifest = _port_manifest()
+    (source / "model.yaml").write_text(
+        yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8"
     )
-    (consumer / "model.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "schema_version": "2.0",
-                "io": {"inputs": [{"name": "x", "contract": contract}], "outputs": []},
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
+    (source / "src" / "model.py").write_text(
+        "class Model:\n    pass\n", encoding="utf-8"
     )
-    lab = tmp_path / "lab.yaml"
-    lab.write_text(
-        yaml.safe_dump(
+
+    package = build_package(source)
+    with ZipFile(package) as archive:
+        names = set(archive.namelist())
+        packaged = yaml.safe_load(archive.read("payload/model.yaml"))
+    assert "payload/compatibility.lock.json" not in names
+    assert packaged["io"]["outputs"][0]["contract"] == SEQUENCE_CONTRACT
+
+
+def test_cli_validates_compares_and_lists_current_types(tmp_path: Path, capsys) -> None:
+    producer = tmp_path / "producer.yaml"
+    producer.write_text(yaml.safe_dump(_port_manifest()), encoding="utf-8")
+
+    consumer_manifest = _port_manifest()
+    consumer_manifest["io"] = {
+        "inputs": [
             {
-                "models": [
-                    {"alias": "producer", "path": "producer"},
-                    {"alias": "consumer", "path": "consumer"},
-                ],
-                "wiring": [{"from": "producer.x", "to": "consumer.x"}],
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
-    snapshot_unsigned = {
-        "ref": "https://biosimulant.com/snapshots/example-ontology/v1",
-        "equivalences": [],
+                "name": "sequence",
+                "signal_type": "scalar",
+                "dtype": "str",
+                "format": "iupac-amino-acid",
+                "contract": SEQUENCE_CONTRACT,
+            }
+        ],
+        "outputs": [],
     }
-    snapshot = {**snapshot_unsigned, "sha256": digest(snapshot_unsigned)}
-    snapshots_path = tmp_path / "ontology-snapshots.json"
-    snapshots_path.write_text(json.dumps([snapshot]), encoding="utf-8")
+    consumer = tmp_path / "consumer.yaml"
+    consumer.write_text(yaml.safe_dump(consumer_manifest), encoding="utf-8")
+
+    main(["compatibility", "validate", str(producer)])
+    assert json.loads(capsys.readouterr().out)["valid"] is True
+
     main(
         [
             "compatibility",
-            "plan",
-            str(lab),
-            "--ontology-snapshots",
-            str(snapshots_path),
+            "compare",
+            f"{producer}#outputs.sequence",
+            f"{consumer}#inputs.sequence",
+            "--sample-json",
+            '"ACDE"',
         ]
     )
-    plan = json.loads(capsys.readouterr().out)
-    assert plan["policy"]["decision"] == "ALLOW"
-    assert plan["reports"][0]["report"]["status"] == "EXACT"
-    assert len(plan["edges"]) == 1
-    assert {
-        "kind": "ontology_snapshot",
-        "ref": snapshot["ref"],
-        "sha256": snapshot["sha256"],
-    } in plan["immutable_references"]
+    assert json.loads(capsys.readouterr().out)["status"] == "ok"
+
+    main(["compatibility", "types"])
+    listed = json.loads(capsys.readouterr().out)
+    assert "chemical.smiles" in listed["types"]
 
 
-def test_signal_envelope_is_digest_bound_and_survives_signal_serialization():
-    contract = {"semantic": {"concept": "dose"}}
-    standard = get_bundle()
-    from biosimulant_model_compatibility_standard import digest
+def test_cli_and_yaml_errors_are_explicit(tmp_path: Path, capsys) -> None:
+    invalid_yaml = tmp_path / "invalid.yaml"
+    invalid_yaml.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="top level must be a YAML mapping"):
+        load_yaml(invalid_yaml)
 
+    with pytest.raises(SystemExit) as raised:
+        main(["compatibility", "compare", str(invalid_yaml), str(invalid_yaml)])
+    assert raised.value.code == 2
+    assert "Point to a port" in capsys.readouterr().err
+
+
+def test_signal_envelope_uses_the_local_contract_digest() -> None:
     envelope = SignalEnvelope(
-        contract_digest=digest(contract),
-        value=2.5,
+        contract_digest=contract_digest(SEQUENCE_CONTRACT),
+        value="ACDE",
+        actual_context={"species": "NCBITaxon:9606"},
         provenance={"run": "source-run"},
     )
-    envelope.validate_contract(contract)
-    spec = SignalSpec.scalar(dtype="float64", contract=contract)
-    from biosim.runtime import coerce_typed_inputs
-
-    signal = coerce_typed_inputs(
-        {"dose": envelope.to_dict()},
-        {"dose": spec},
-        source="test",
-    )["dose"]
-    restored = type(signal).from_dict(signal.to_dict())
-    assert restored.compatibility_envelope.provenance == {"run": "source-run"}
-    assert standard.digest.startswith("sha256:")
-
-    invalid = SignalEnvelope(contract_digest="sha256:" + "0" * 64, value=2.5)
-    with pytest.raises(ValueError, match="made for a different contract"):
-        invalid.validate_contract(contract)
-
-
-def test_signal_envelope_uses_normalized_digest_and_rejects_context_conflicts():
-    from biosimulant_model_compatibility_standard import digest, normalize_contract
-
-    contract = {
-        "semantic": {"concept": "expression", "qualifiers": ["z", "a"]},
-        "biological_context": {"species": "NCBITaxon:9606"},
+    envelope.validate_contract(SEQUENCE_CONTRACT)
+    assert SignalEnvelope.from_dict(envelope.to_dict()).provenance == {
+        "run": "source-run"
     }
-    envelope = SignalEnvelope(
-        contract_digest=digest(normalize_contract(contract)),
-        value=[1.0],
-        actual_context={"species": "NCBITaxon:9606", "tissue": "UBERON:0002107"},
-    )
-    envelope.validate_contract(contract)
 
-    conflicting = SignalEnvelope(
-        contract_digest=digest(normalize_contract(contract)),
-        value=[1.0],
-        actual_context={"species": "NCBITaxon:10090"},
-    )
-    with pytest.raises(ValueError, match="actual_context.species"):
-        conflicting.validate_contract(contract)
+    invalid = SignalEnvelope(contract_digest="sha256:" + "0" * 64, value="ACDE")
+    with pytest.raises(ValueError, match="different contract"):
+        invalid.validate_contract(SEQUENCE_CONTRACT)
 
 
-def test_canonical_output_signal_envelope_is_validated_at_world_boundary():
-    from biosimulant_model_compatibility_standard import digest
+class _BadSequenceProducer(BioModule):
+    execution_policy = "each_window"
 
-    contract = {"semantic": {"concept": "concentration"}}
+    def outputs(self):
+        return {
+            "sequence": SignalSpec.scalar(dtype="str", contract=SEQUENCE_CONTRACT)
+        }
 
-    class EnvelopeProducer(BioModule):
-        execution_policy = "each_window"
+    def execute(self, inputs, *, context: ExecutionContext):
+        return {"sequence": "ACD1"}
 
-        def outputs(self):
-            return {"quantity": SignalSpec.scalar(dtype="float64", contract=contract)}
 
-        def execute(self, inputs, *, context: ExecutionContext):
-            return {
-                "quantity": SignalEnvelope(
-                    contract_digest=digest(contract),
-                    value=1.0,
-                    provenance={"model": "producer"},
-                ).to_dict()
-            }
+class _SequenceConsumer(BioModule):
+    execution_policy = "each_window"
 
+    def inputs(self):
+        return {
+            "sequence": SignalSpec.scalar(dtype="str", contract=SEQUENCE_CONTRACT)
+        }
+
+    def execute(self, inputs, *, context: ExecutionContext):
+        return {}
+
+
+def test_world_rechecks_the_actual_value_when_it_crosses_a_wire() -> None:
     world = BioWorld(communication_step=1.0)
-    world.add_biomodule("producer", EnvelopeProducer())
-    world.run(1.0)
-    signal = world.get_outputs("producer")["quantity"]
-    assert signal.compatibility_envelope.provenance == {"model": "producer"}
+    world.add_biomodule("producer", _BadSequenceProducer())
+    world.add_biomodule("consumer", _SequenceConsumer())
+    world.connect("producer.sequence", "consumer.sequence")
+    with pytest.raises(ValueError, match="unsupported character"):
+        world.run(2.0)

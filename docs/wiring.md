@@ -33,7 +33,14 @@ wiring:
 - `from` and `to` references must use `name.port`.
 - Source ports must exist in the source module’s `outputs()`.
 - Destination ports must exist in the target module’s `inputs()`.
-- Connection compatibility is checked via `SignalSpec`.
+- Shape, data type, format and units are checked via `SignalSpec`.
+- Optional semantic contracts compare data type, species and identifier namespace.
+- Registered type checkers inspect each actual value before the consumer receives it.
+
+Compatibility checks return `ok`, `warning` or `blocked`. `BioWorld.connect()`
+raises for a blocked declaration, and a run stops if a value-aware check is
+blocked. See the [model builder guide](https://docs.biosimulant.com/standards/model-compatibility/model-yaml)
+for current types and the extension workflow.
 
 ## Loader helpers
 

@@ -448,6 +448,13 @@ class BioWorld:
             if source_signal is None:
                 continue
             target_spec = entry.input_specs[conn.target_signal]
+            source_spec = self._modules[conn.source_module].output_specs[conn.source_signal]
+            validate_connection_specs(
+                source_spec,
+                target_spec,
+                sample=source_signal.value,
+                check_sample=True,
+            )
             self._warn_if_input_stale(conn, source_signal, target_spec, start)
             if source_signal.kind == "event":
                 if conn.last_event_time is not None and source_signal.emitted_at <= conn.last_event_time:

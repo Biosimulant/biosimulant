@@ -199,6 +199,7 @@ class AcceptedSignalProfile:
     shape: Optional[tuple[int, ...]] = None
     schema: Optional[dict[str, str]] = None
     accepted_units: Optional[tuple[str, ...]] = None
+    format: Optional[str] = None
     description: Optional[str] = None
     contract: Optional[dict[str, Any]] = None
 
@@ -225,6 +226,8 @@ class AcceptedSignalProfile:
                     raise ValueError("accepted_units must not contain duplicates")
                 object.__setattr__(self, "accepted_units", normalized_units)
 
+        object.__setattr__(self, "format", _normalize_input_format(self.format))
+
         if self.signal_type == "scalar" and self.shape not in (None, ()):
             raise ValueError("scalar accepted profiles cannot declare an array shape")
         if self.signal_type == "array" and self.shape is None:
@@ -245,6 +248,7 @@ class AcceptedSignalProfile:
             "shape": list(self.shape) if self.shape is not None else None,
             "schema": dict(self.schema) if self.schema is not None else None,
             "accepted_units": list(self.accepted_units) if self.accepted_units is not None else None,
+            "format": self.format,
             "description": self.description,
             "contract": copy.deepcopy(self.contract) if self.contract is not None else None,
         }
@@ -257,6 +261,7 @@ class AcceptedSignalProfile:
             shape=tuple(data["shape"]) if data.get("shape") is not None else None,
             schema=dict(data["schema"]) if data.get("schema") is not None else None,
             accepted_units=tuple(data["accepted_units"]) if data.get("accepted_units") is not None else None,
+            format=data.get("format"),
             description=data.get("description"),
             contract=copy.deepcopy(data["contract"]) if data.get("contract") is not None else None,
         )
@@ -275,6 +280,8 @@ class AcceptedSignalProfile:
                 return False
             if source.emitted_unit not in self.accepted_units:
                 return False
+        if self.format is not None and source.format != self.format:
+            return False
         return True
 
 
@@ -287,6 +294,7 @@ class SignalSpec:
     dtype: Optional[str] = None
     shape: Optional[tuple[int, ...]] = None
     emitted_unit: Optional[str] = None
+    accepted_units: Optional[tuple[str, ...]] = None
     accepted_profiles: Optional[tuple[AcceptedSignalProfile, ...]] = None
     interpolation: InterpolationPolicy = "zoh"
     max_age: Optional[float] = None
@@ -337,6 +345,19 @@ class SignalSpec:
             if not clean_emitted_unit:
                 raise ValueError("emitted_unit must not be empty")
             object.__setattr__(self, "emitted_unit", clean_emitted_unit)
+
+        accepted_units = self.accepted_units
+        if isinstance(accepted_units, list):
+            object.__setattr__(self, "accepted_units", tuple(str(unit) for unit in accepted_units))
+            accepted_units = self.accepted_units
+        if accepted_units is not None:
+            normalized_units = tuple(str(unit).strip() for unit in accepted_units if str(unit).strip())
+            if not normalized_units:
+                object.__setattr__(self, "accepted_units", None)
+            else:
+                if len(set(normalized_units)) != len(normalized_units):
+                    raise ValueError("accepted_units must not contain duplicates")
+                object.__setattr__(self, "accepted_units", normalized_units)
 
         object.__setattr__(self, "dtype", _normalize_dtype(self.dtype))
         object.__setattr__(self, "value_type", _normalize_input_value_type(self.value_type))
@@ -392,6 +413,7 @@ class SignalSpec:
         *,
         dtype: str = "float64",
         emitted_unit: Optional[str] = None,
+        accepted_units: Optional[list[str] | tuple[str, ...]] = None,
         accepted_profiles: Optional[list[AcceptedSignalProfile | Mapping[str, Any]] | tuple[AcceptedSignalProfile, ...]] = None,
         interpolation: InterpolationPolicy = "zoh",
         max_age: Optional[float] = None,
@@ -413,6 +435,7 @@ class SignalSpec:
             kind="state",
             dtype=dtype,
             emitted_unit=emitted_unit,
+            accepted_units=tuple(accepted_units) if accepted_units is not None else None,
             accepted_profiles=tuple(accepted_profiles) if accepted_profiles is not None else None,
             interpolation=interpolation,
             max_age=max_age,
@@ -437,6 +460,7 @@ class SignalSpec:
         dtype: str,
         shape: tuple[int, ...],
         emitted_unit: Optional[str] = None,
+        accepted_units: Optional[list[str] | tuple[str, ...]] = None,
         accepted_profiles: Optional[list[AcceptedSignalProfile | Mapping[str, Any]] | tuple[AcceptedSignalProfile, ...]] = None,
         interpolation: InterpolationPolicy = "zoh",
         max_age: Optional[float] = None,
@@ -459,6 +483,7 @@ class SignalSpec:
             dtype=dtype,
             shape=shape,
             emitted_unit=emitted_unit,
+            accepted_units=tuple(accepted_units) if accepted_units is not None else None,
             accepted_profiles=tuple(accepted_profiles) if accepted_profiles is not None else None,
             interpolation=interpolation,
             max_age=max_age,
@@ -482,6 +507,7 @@ class SignalSpec:
         *,
         schema: Mapping[str, str],
         emitted_unit: Optional[str] = None,
+        accepted_units: Optional[list[str] | tuple[str, ...]] = None,
         accepted_profiles: Optional[list[AcceptedSignalProfile | Mapping[str, Any]] | tuple[AcceptedSignalProfile, ...]] = None,
         max_age: Optional[float] = None,
         stale_policy: StalePolicy = "warn",
@@ -501,6 +527,7 @@ class SignalSpec:
             signal_type="record",
             kind="state",
             emitted_unit=emitted_unit,
+            accepted_units=tuple(accepted_units) if accepted_units is not None else None,
             accepted_profiles=tuple(accepted_profiles) if accepted_profiles is not None else None,
             schema=dict(schema),
             max_age=max_age,
@@ -524,6 +551,7 @@ class SignalSpec:
         *,
         schema: Optional[Mapping[str, str]] = None,
         emitted_unit: Optional[str] = None,
+        accepted_units: Optional[list[str] | tuple[str, ...]] = None,
         accepted_profiles: Optional[list[AcceptedSignalProfile | Mapping[str, Any]] | tuple[AcceptedSignalProfile, ...]] = None,
         max_age: Optional[float] = None,
         stale_policy: StalePolicy = "warn",
@@ -544,6 +572,7 @@ class SignalSpec:
             kind="event",
             interpolation="none",
             emitted_unit=emitted_unit,
+            accepted_units=tuple(accepted_units) if accepted_units is not None else None,
             accepted_profiles=tuple(accepted_profiles) if accepted_profiles is not None else None,
             schema=dict(schema) if schema else None,
             max_age=max_age,
@@ -574,6 +603,9 @@ class SignalSpec:
                 dtype=self.dtype,
                 shape=self.shape,
                 schema=dict(self.schema) if self.schema is not None else None,
+                accepted_units=self.accepted_units,
+                format=self.format,
+                contract=copy.deepcopy(self.contract) if self.contract is not None else None,
             ),
         )
 
@@ -593,6 +625,7 @@ class SignalSpec:
             "dtype": self.dtype,
             "shape": list(self.shape) if self.shape is not None else None,
             "emitted_unit": self.emitted_unit,
+            "accepted_units": list(self.accepted_units) if self.accepted_units is not None else None,
             "accepted_profiles": [profile.to_dict() for profile in self.accepted_profiles] if self.accepted_profiles is not None else None,
             "interpolation": self.interpolation,
             "max_age": self.max_age,
@@ -619,6 +652,7 @@ class SignalSpec:
             dtype=data.get("dtype"),
             shape=tuple(data["shape"]) if data.get("shape") is not None else None,
             emitted_unit=data.get("emitted_unit"),
+            accepted_units=tuple(data["accepted_units"]) if data.get("accepted_units") is not None else None,
             accepted_profiles=tuple(
                 AcceptedSignalProfile.from_dict(profile) for profile in data["accepted_profiles"]
             ) if data.get("accepted_profiles") is not None else None,
@@ -644,27 +678,36 @@ def validate_port_spec_direction(spec: SignalSpec, *, direction: str) -> None:
     if direction == "input":
         if spec.emitted_unit is not None:
             raise ValueError("input SignalSpec declarations cannot set emitted_unit")
+        if spec.accepted_units is not None and spec.accepted_profiles is not None:
+            raise ValueError(
+                "input SignalSpec declarations must use accepted_units or accepted_profiles, not both"
+            )
         return
     if direction == "output":
+        if spec.accepted_units is not None:
+            raise ValueError("output SignalSpec declarations cannot set accepted_units")
         if spec.accepted_profiles is not None:
             raise ValueError("output SignalSpec declarations cannot set accepted_profiles")
         return
     raise ValueError(f"unknown signal direction: {direction!r}")
 
 
-def validate_connection_specs(source: SignalSpec, target: SignalSpec) -> None:
+def validate_connection_specs(
+    source: SignalSpec,
+    target: SignalSpec,
+    *,
+    sample: Any = None,
+    check_sample: bool = False,
+) -> None:
     """Validate that one declared output port can feed one input port."""
-    if source.kind != target.kind:
-        raise ValueError(f"incompatible signal kinds: source '{source.kind}' cannot feed target '{target.kind}'")
-    profile = target.match_input_profile(source)
-    if profile is None:
-        raise ValueError(
-            "incompatible input profiles: "
-            f"source ({source.signal_type}, {source.dtype}, {source.shape}, {source.emitted_unit}) "
-            f"does not match any accepted input profile"
-        )
-    if target.interpolation == "linear" and not source.is_numeric:
-        raise ValueError("linear interpolation requires a numeric source signal")
+    from .compatibility import check_compatibility, enforce_result
+
+    enforce_result(
+        check_compatibility(source, target, sample=sample)
+        if check_sample
+        else check_compatibility(source, target),
+        context="incompatible ports",
+    )
 
 
 def scalar_or_record_input(unit: str, description: str, *, dtype: str = "float64") -> SignalSpec:
@@ -776,43 +819,25 @@ class SignalEnvelope:
         )
 
     def validate_contract(self, contract: Mapping[str, Any] | None) -> None:
-        from .compatibility import _standard
+        from .compatibility import contract_digest, enforce_result, validate_contract
 
-        standard = _standard()
-        findings = standard.validate_object(
-            self.to_dict(), "signal-envelope.schema.json"
-        )
-        if findings:
-            raise ValueError(
-                "Invalid SignalEnvelope: "
-                + "; ".join(f"{item.path}: {item.message}" for item in findings)
-            )
         if contract is None:
             raise ValueError("Can't check SignalEnvelope: this port has no contract")
-        normalized_contract = standard.normalize_contract(dict(contract))
-        expected = standard.digest(normalized_contract)
+        enforce_result(validate_contract(contract), context="Invalid SignalEnvelope contract")
+        expected = contract_digest(contract)
         if self.contract_digest != expected:
             raise ValueError(
                 "SignalEnvelope was made for a different contract "
                 f"(port expects {expected}, envelope has {self.contract_digest})"
             )
-
-        sections = {
-            "actual_context": "biological_context",
-            "origin": "origin",
-            "uncertainty": "uncertainty",
-            "artifact": "artifact",
-        }
-        for envelope_field, contract_field in sections.items():
-            actual = getattr(self, envelope_field)
-            declared = normalized_contract.get(contract_field)
-            if not isinstance(actual, Mapping) or not isinstance(declared, Mapping):
-                continue
-            for name, value in actual.items():
-                if name in declared and declared[name] != value:
+        if isinstance(self.actual_context, Mapping):
+            for name in ("species", "identifier_namespace"):
+                actual = self.actual_context.get(name)
+                declared = contract.get(name)
+                if actual is not None and declared not in {None, "any", actual}:
                     raise ValueError(
-                        f"SignalEnvelope {envelope_field}.{name} is {value!r}, but the port "
-                        f"contract declares {declared[name]!r}"
+                        f"SignalEnvelope actual_context.{name} is {actual!r}, but the port "
+                        f"contract declares {declared!r}"
                     )
 
 
