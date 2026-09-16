@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 from .__about__ import __version__
 
 DEFAULT_REGISTRY = "hub.biosimulant.com"
-DEFAULT_HUB_API_BASE = "https://prod-api.biosimulant.com/api"
+DEFAULT_HUB_API_BASE = "https://api.biosimulant.com/api"
 CLI_USER_AGENT = f"biosimulant-cli/{__version__}"
 TOKEN_ENV = "BIOSIMULANT_TOKEN"
 WORKSPACE_TOKEN_ENV = "BIOSIMULANT_WORKSPACE_TOKEN"

@@ -20,7 +20,7 @@ from .credentials import (
 from .pack import PackageError
 
 
-DEFAULT_REGISTRY_URL = "https://prod-api.biosimulant.com/api"
+DEFAULT_REGISTRY_URL = "https://api.biosimulant.com/api"
 DEFAULT_REGISTRY_ORIGIN = f"https://{DEFAULT_REGISTRY}"
 REGISTRY_URL_ENV = "BIOSIMULANT_REGISTRY_URL"
 LEGACY_API_BASE_ENV = "BIOSIMULANT_API_BASE_URL"
