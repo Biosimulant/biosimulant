@@ -7,6 +7,37 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Record per-connection compatibility evidence. `labs run` results now carry a
+  `compatibility` section with provenance (standard, catalogue, runtime version
+  and profile digests), a record for every wire with its mode (`verified`,
+  `partial`, `structural` or `blocked`), issues and live value-check counts,
+  value-check counts for every profiled port, and a capped list of violations.
+- Report static wire modes from `labs validate` for source Labs, which now fails
+  on wires whose declared profiles block.
+- Add `CompatibilityRecorder`, `wire_mode`, `check_declared_contracts` and
+  `CompatibilityError` (a `PackageError` with code `compatibility_blocked`).
+
+### Changed
+
+- A blocked wire, initial input or emitted value raises `CompatibilityError`
+  carrying the partial record. `labs run`, `packages run` and `pack run` exit 2
+  with a structured `compatibility_blocked` error, and `labs run` still writes
+  `--results-file` as `{"status": "failed", "error": …, "compatibility": …}`.
+  Managed Python child runs pass the same error back to the parent.
+- Check profiled output values when a module emits them, not only when a wire
+  carries them. An unchanged output file is checked once.
+- Check each committed value once per wire instead of on every window it is read.
+
+### Fixed
+
+- Bind `model.yaml` port declarations, including contracts, for models that
+  Labs load from directories, so profiles declared only in `model.yaml` are
+  enforced in Lab runs. Lab initial inputs use those bound specs.
+- Stop a model's `biosimulant==…` dependency pin from installing another
+  runtime version into the interpreter that is running the Lab.
+
 ## [0.0.33] - 2026-09-17
 
 ### Added

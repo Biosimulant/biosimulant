@@ -8,7 +8,9 @@ import hashlib
 import json
 import logging
 import math
+import os
 from pathlib import Path
+import stat
 from typing import Any, Callable, Iterable, Literal, Mapping, TypeAlias
 
 from biosimulant_model_compatibility_standard import (
@@ -21,6 +23,8 @@ from biosimulant_model_compatibility_standard import (
     profile_digest,
 )
 
+from .__about__ import __version__
+from ._errors import PackageError
 from .modules import BioModule
 from .signals import SignalSpec
 
@@ -28,6 +32,12 @@ logger = logging.getLogger(__name__)
 
 CompatibilityStatus: TypeAlias = Literal["ok", "warning", "blocked"]
 IssueLevel: TypeAlias = Literal["warning", "blocked"]
+WireMode: TypeAlias = Literal["verified", "partial", "structural", "blocked"]
+ValueCheckKind: TypeAlias = Literal["initial_input", "wire_value", "output_value"]
+CATALOGUE_PACKAGE = "biosimulant-model-compatibility-standard"
+RECORD_SCHEMA_VERSION = "1"
+MAX_WIRE_ISSUES = 20
+MAX_VIOLATIONS = 100
 NO_SAMPLE = object()
 _CONTRACT_FIELDS = {"profile", "species", "identifier_namespace"}
 _STANDARD_FIELDS = {"standard", "version"}
@@ -331,10 +341,54 @@ def check_compatibility(source: SignalSpec, target: SignalSpec, *, sample: Any =
             _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", "Linear interpolation requires a numeric source signal.")
         )
 
-    source_contract = source.contract
     target_contract = accepted.contract if accepted.contract is not None else target.contract
+    issues.extend(_contract_issues(source.contract, target_contract, sample))
+    return CompatibilityResult(tuple(issues))
+
+
+def check_declared_contracts(
+    source_contract: Mapping[str, Any] | None,
+    target_contract: Mapping[str, Any] | None,
+) -> CompatibilityResult:
+    """Compare the profiles two ports declare, without port structure or values."""
+
+    return CompatibilityResult(tuple(_contract_issues(source_contract, target_contract, NO_SAMPLE)))
+
+
+def effective_target_contract(source: SignalSpec, target: SignalSpec) -> Mapping[str, Any] | None:
+    """Return the contract the target applies to values from this source."""
+
+    accepted = target.match_input_profile(source)
+    if accepted is not None and accepted.contract is not None:
+        return accepted.contract
+    return target.contract
+
+
+def _mode_for_contracts(
+    result: CompatibilityResult,
+    source_contract: Mapping[str, Any] | None,
+    target_contract: Mapping[str, Any] | None,
+) -> WireMode:
+    if result.status == "blocked":
+        return "blocked"
+    declared = int(source_contract is not None) + int(target_contract is not None)
+    return ("structural", "partial", "verified")[declared]
+
+
+def wire_mode(source: SignalSpec, target: SignalSpec, result: CompatibilityResult) -> WireMode:
+    """Classify a checked wire as verified, partial, structural or blocked."""
+
+    return _mode_for_contracts(result, source.contract, effective_target_contract(source, target))
+
+
+def _contract_issues(
+    source_contract: Mapping[str, Any] | None,
+    target_contract: Mapping[str, Any] | None,
+    sample: Any,
+) -> list[CompatibilityIssue]:
+    issues: list[CompatibilityIssue] = []
     if source_contract is None and target_contract is None:
-        return CompatibilityResult(tuple(issues))
+        return issues
     if source_contract is None or target_contract is None:
         declared_contract = (
             source_contract if source_contract is not None else target_contract
@@ -342,7 +396,7 @@ def check_compatibility(source: SignalSpec, target: SignalSpec, *, sample: Any =
         validation = validate_contract(declared_contract)
         issues.extend(validation.issues)
         if validation.status == "blocked":
-            return CompatibilityResult(tuple(issues))
+            return issues
 
         missing_side = "source" if source_contract is None else "target"
         if missing_side == "source":
@@ -369,14 +423,14 @@ def check_compatibility(source: SignalSpec, target: SignalSpec, *, sample: Any =
                 sample,
             )
         )
-        return CompatibilityResult(tuple(issues))
+        return issues
 
     source_validation = validate_contract(source_contract)
     target_validation = validate_contract(target_contract)
     issues.extend(source_validation.issues)
     issues.extend(target_validation.issues)
     if source_validation.status == "blocked" or target_validation.status == "blocked":
-        return CompatibilityResult(tuple(issues))
+        return issues
     source_ref = str(source_contract["profile"])
     target_ref = str(target_contract["profile"])
     if source_ref != target_ref:
@@ -387,12 +441,12 @@ def check_compatibility(source: SignalSpec, target: SignalSpec, *, sample: Any =
                 f"The source uses '{source_ref}', but the target expects '{target_ref}'.",
             )
         )
-        return CompatibilityResult(tuple(issues))
+        return issues
     issues.extend(_compare_context(source_contract, target_contract))
     if any(issue.level == "blocked" for issue in issues):
-        return CompatibilityResult(tuple(issues))
+        return issues
     issues.extend(_run_checker(get_profile(source_ref), sample))
-    return CompatibilityResult(tuple(issues))
+    return issues
 
 
 def check_payload(contract: Mapping[str, Any] | None, value: Any) -> CompatibilityResult:
@@ -409,10 +463,14 @@ def enforce_result(
     *,
     context: str,
     suppressed_warning_codes: tuple[str, ...] = (),
+    recorder: "CompatibilityRecorder | None" = None,
 ) -> None:
     blocked = [issue.message for issue in result.issues if issue.level == "blocked"]
     if blocked:
-        raise ValueError(f"{context}: " + "; ".join(blocked))
+        message = f"{context}: " + "; ".join(blocked)
+        if recorder is not None:
+            raise recorder.blocked_error(message)
+        raise ValueError(message)
     for issue in result.issues:
         if issue.code not in suppressed_warning_codes:
             logger.warning("%s: %s", context, issue.message)
@@ -710,11 +768,332 @@ def compatibility_provenance(manifest: Mapping[str, Any]) -> dict[str, Any] | No
     return {
         "standard": STANDARD_ID,
         "version": STANDARD_VERSION,
-        "catalogue_package": "biosimulant-model-compatibility-standard",
+        "catalogue_package": CATALOGUE_PACKAGE,
         "catalogue_version": CATALOGUE_VERSION,
         "catalogue_sha256": CATALOGUE_SHA256,
         "profiles": [{"ref": ref, "sha256": profile_digest(ref)} for ref in sorted(refs)],
     }
+
+
+class CompatibilityError(PackageError):
+    """A wire, input or output value was blocked by a compatibility check."""
+
+    code = "compatibility_blocked"
+
+    def __init__(self, message: str, *, compatibility: Mapping[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.compatibility = copy.deepcopy(dict(compatibility)) if compatibility is not None else None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"code": self.code, "message": str(self)}
+        if self.compatibility is not None:
+            payload["compatibility"] = copy.deepcopy(self.compatibility)
+        return payload
+
+
+def _contract_ref(contract: Mapping[str, Any] | None) -> str | None:
+    if isinstance(contract, Mapping) and isinstance(contract.get("profile"), str):
+        return str(contract["profile"])
+    return None
+
+
+def _contract_context(contract: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(contract, Mapping):
+        return {}
+    return {key: contract[key] for key in ("species", "identifier_namespace") if key in contract}
+
+
+def _spec_contracts(spec: SignalSpec) -> list[Mapping[str, Any]]:
+    contracts = [spec.contract] if spec.contract is not None else []
+    for accepted in spec.accepted_profiles or ():
+        if accepted.contract is not None:
+            contracts.append(accepted.contract)
+    return contracts
+
+
+def _endpoint(module: str, port: str, contract: Mapping[str, Any] | None) -> dict[str, Any]:
+    return {
+        "module": module,
+        "port": port,
+        "profile": _contract_ref(contract),
+        "context": _contract_context(contract),
+    }
+
+
+def _file_fingerprint(value: Any) -> tuple[str, int, int] | None:
+    if not isinstance(value, (str, os.PathLike)):
+        return None
+    try:
+        path = os.path.abspath(os.fspath(value))
+        details = os.stat(path)
+    except (OSError, TypeError, ValueError):
+        return None
+    if not stat.S_ISREG(details.st_mode):
+        return None
+    return path, details.st_mtime_ns, details.st_size
+
+
+def _worst_status(current: str, result: CompatibilityResult) -> CompatibilityStatus:
+    order = {"ok": 0, "warning": 1, "blocked": 2}
+    return current if order.get(current, 0) >= order[result.status] else result.status  # type: ignore[return-value]
+
+
+class CompatibilityRecorder:
+    """Collects the compatibility outcome of every wire and profiled port in one run.
+
+    The record holds counts and issues, never the checked values themselves.
+    """
+
+    def __init__(self) -> None:
+        self._wires: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        self._ports: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self._profiles: set[str] = set()
+        self._violations: list[dict[str, Any]] = []
+        self._violation_count = 0
+        self._value_checks = 0
+        self._value_failures = 0
+        self._truncated = False
+        self._checked_output_files: dict[tuple[str, str], tuple[str, int, int]] = {}
+
+    def record_port(self, module: str, direction: str, port: str, spec: SignalSpec) -> None:
+        self.record_declared_port(module, direction, port, spec.contract, _spec_contracts(spec))
+
+    def record_declared_port(
+        self,
+        module: str,
+        direction: str,
+        port: str,
+        contract: Mapping[str, Any] | None,
+        contracts: Iterable[Mapping[str, Any]] = (),
+    ) -> None:
+        refs = sorted(
+            {
+                ref
+                for ref in (_contract_ref(item) for item in (contract, *contracts))
+                if ref is not None
+            }
+        )
+        if not refs:
+            return
+        self._profiles.update(refs)
+        direction = "input" if direction.startswith("input") else "output"
+        profile = _contract_ref(contract) or (refs[0] if len(refs) == 1 else None)
+        entry: dict[str, Any] = {
+            "module": module,
+            "direction": direction,
+            "port": port,
+            "profile": profile,
+            "value_checks": {"count": 0, "failures": 0},
+        }
+        if profile is None:
+            entry["accepted_profiles"] = refs
+        self._ports.setdefault((module, direction, port), entry)
+
+    def record_connection(
+        self,
+        source_module: str,
+        source_port: str,
+        source_spec: SignalSpec,
+        target_module: str,
+        target_port: str,
+        target_spec: SignalSpec,
+        result: CompatibilityResult,
+    ) -> dict[str, Any]:
+        return self.record_declared_wire(
+            source_module,
+            source_port,
+            source_spec.contract,
+            target_module,
+            target_port,
+            effective_target_contract(source_spec, target_spec),
+            result,
+        )
+
+    def record_declared_wire(
+        self,
+        source_module: str,
+        source_port: str,
+        source_contract: Mapping[str, Any] | None,
+        target_module: str,
+        target_port: str,
+        target_contract: Mapping[str, Any] | None,
+        result: CompatibilityResult,
+    ) -> dict[str, Any]:
+        for contract in (source_contract, target_contract):
+            ref = _contract_ref(contract)
+            if ref is not None:
+                self._profiles.add(ref)
+        key = (source_module, source_port, target_module, target_port)
+        wire = self._wires.get(key)
+        if wire is None:
+            wire = {
+                "source": _endpoint(source_module, source_port, source_contract),
+                "target": _endpoint(target_module, target_port, target_contract),
+                "mode": _mode_for_contracts(result, source_contract, target_contract),
+                "status": "ok",
+                "issues": [],
+                "value_checks": {"count": 0, "failures": 0},
+            }
+            self._wires[key] = wire
+        self._merge_result(wire, result)
+        if result.status == "blocked":
+            self._add_violation("connect", target_module, target_port, f"{source_module}.{source_port}", result, None)
+        return wire
+
+    def record_value_check(
+        self,
+        kind: ValueCheckKind,
+        module: str,
+        port: str,
+        peer: str | None,
+        result: CompatibilityResult,
+        sim_time: float | None,
+        *,
+        profile: str | None = None,
+    ) -> None:
+        failed = result.status == "blocked"
+        wire: dict[str, Any] | None = None
+        if kind == "wire_value":
+            source_module, _, source_port = (peer or "").rpartition(".")
+            wire = self._wires.get((source_module, source_port, module, port))
+            profiled = wire is None or bool(wire["source"]["profile"] or wire["target"]["profile"])
+            if not profiled and not failed:
+                return
+        direction = "output" if kind == "output_value" else "input"
+        port_entry = self._ports.get((module, direction, port))
+        if port_entry is None and profile is not None:
+            port_entry = {
+                "module": module,
+                "direction": direction,
+                "port": port,
+                "profile": profile,
+                "value_checks": {"count": 0, "failures": 0},
+            }
+            self._ports[(module, direction, port)] = port_entry
+            self._profiles.add(profile)
+
+        self._value_checks += 1
+        if failed:
+            self._value_failures += 1
+        for counts in (
+            wire["value_checks"] if wire is not None else None,
+            port_entry["value_checks"] if port_entry is not None else None,
+        ):
+            if counts is not None:
+                counts["count"] += 1
+                if failed:
+                    counts["failures"] += 1
+        if wire is not None:
+            self._merge_result(wire, result)
+        if failed:
+            self._add_violation(kind, module, port, peer, result, sim_time)
+
+    def check_output(
+        self,
+        module: str,
+        port: str,
+        contract: Mapping[str, Any],
+        value: Any,
+        sim_time: float | None,
+    ) -> CompatibilityResult | None:
+        """Check one emitted value, skipping a file already checked unchanged."""
+
+        fingerprint = _file_fingerprint(value)
+        cache_key = (module, port)
+        if fingerprint is not None and self._checked_output_files.get(cache_key) == fingerprint:
+            return None
+        result = check_payload(contract, value)
+        self.record_value_check(
+            "output_value",
+            module,
+            port,
+            None,
+            result,
+            sim_time,
+            profile=_contract_ref(contract),
+        )
+        if fingerprint is not None and result.status != "blocked":
+            self._checked_output_files[cache_key] = fingerprint
+        else:
+            self._checked_output_files.pop(cache_key, None)
+        return result
+
+    def _merge_result(self, wire: dict[str, Any], result: CompatibilityResult) -> None:
+        wire["status"] = _worst_status(wire["status"], result)
+        if result.status == "blocked":
+            wire["mode"] = "blocked"
+        issues = wire["issues"]
+        for issue in result.issues:
+            item = issue.to_dict()
+            if item in issues:
+                continue
+            if len(issues) >= MAX_WIRE_ISSUES:
+                self._truncated = True
+                break
+            issues.append(item)
+
+    def _add_violation(
+        self,
+        stage: str,
+        module: str,
+        port: str,
+        peer: str | None,
+        result: CompatibilityResult,
+        sim_time: float | None,
+    ) -> None:
+        self._violation_count += 1
+        if len(self._violations) >= MAX_VIOLATIONS:
+            self._truncated = True
+            return
+        blocked = [issue for issue in result.issues if issue.level == "blocked"]
+        self._violations.append(
+            {
+                "stage": stage,
+                "module": module,
+                "port": port,
+                "peer": peer,
+                "code": blocked[0].code if blocked else "BLOCKED",
+                "message": "; ".join(issue.message for issue in blocked) or "Compatibility check blocked the value.",
+                "sim_time": sim_time,
+            }
+        )
+
+    def blocked_error(self, message: str) -> CompatibilityError:
+        return CompatibilityError(message, compatibility=self.to_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        wires = [copy.deepcopy(wire) for wire in self._wires.values()]
+        profiles: list[dict[str, Any]] = []
+        for ref in sorted(self._profiles):
+            try:
+                digest: str | None = profile_digest(ref)
+            except KeyError:
+                digest = None
+            profiles.append({"ref": ref, "sha256": digest})
+        return {
+            "schema_version": RECORD_SCHEMA_VERSION,
+            "standard": STANDARD_ID,
+            "version": STANDARD_VERSION,
+            "catalogue_package": CATALOGUE_PACKAGE,
+            "catalogue_version": CATALOGUE_VERSION,
+            "catalogue_sha256": CATALOGUE_SHA256,
+            "runtime_version": __version__,
+            "profiles": profiles,
+            "summary": {
+                "wires": len(wires),
+                "verified": sum(1 for wire in wires if wire["mode"] == "verified"),
+                "partial": sum(1 for wire in wires if wire["mode"] == "partial"),
+                "structural": sum(1 for wire in wires if wire["mode"] == "structural"),
+                "blocked": sum(1 for wire in wires if wire["mode"] == "blocked"),
+                "value_checks": self._value_checks,
+                "value_failures": self._value_failures,
+                "violations": self._violation_count,
+            },
+            "wires": wires,
+            "ports": [copy.deepcopy(entry) for entry in self._ports.values()],
+            "violations": copy.deepcopy(self._violations),
+            "truncated": self._truncated,
+        }
 
 
 def _require_string(sample: Any, label: str) -> tuple[str | None, tuple[CompatibilityIssue, ...]]:

@@ -699,16 +699,32 @@ def validate_connection_specs(
     sample: Any = None,
     check_sample: bool = False,
     suppressed_warning_codes: tuple[str, ...] = (),
+    recorder: Any = None,
+    identity: tuple[str, str, str, str] | None = None,
 ) -> None:
-    """Validate that one declared output port can feed one input port."""
+    """Validate that one declared output port can feed one input port.
+
+    With a ``recorder`` and an ``identity`` of ``(source_module, source_port,
+    target_module, target_port)``, the result is recorded before it is enforced
+    and a block raises ``CompatibilityError``.
+    """
     from .compatibility import check_compatibility, enforce_result
 
-    enforce_result(
+    result = (
         check_compatibility(source, target, sample=sample)
         if check_sample
-        else check_compatibility(source, target),
+        else check_compatibility(source, target)
+    )
+    if recorder is not None and identity is not None:
+        source_module, source_port, target_module, target_port = identity
+        recorder.record_connection(
+            source_module, source_port, source, target_module, target_port, target, result
+        )
+    enforce_result(
+        result,
         context="incompatible ports",
         suppressed_warning_codes=suppressed_warning_codes,
+        recorder=recorder,
     )
 
 

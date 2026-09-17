@@ -228,6 +228,8 @@ def _make_typed_signal(
     actual_unit: str | None,
     error_cls: type[Exception],
     compatibility_envelope: Any = None,
+    recorder: Any = None,
+    module_name: str | None = None,
 ):
     from biosim import ArraySignal, EventSignal, RecordSignal, ScalarSignal
 
@@ -260,13 +262,23 @@ def _make_typed_signal(
     if signal_spec.contract is not None:
         from biosim.compatibility import check_payload, enforce_result
 
-        try:
-            enforce_result(
-                check_payload(signal_spec.contract, value),
-                context=f"Input '{name}'",
+        result = check_payload(signal_spec.contract, value)
+        if recorder is not None:
+            recorder.record_value_check(
+                "initial_input",
+                module_name or source,
+                name,
+                None,
+                result,
+                emitted_at,
+                profile=signal_spec.contract.get("profile"),
             )
-        except ValueError as exc:
-            _raise(error_cls, str(exc), exc)
+            enforce_result(result, context=f"Input '{name}'", recorder=recorder)
+        else:
+            try:
+                enforce_result(result, context=f"Input '{name}'")
+            except ValueError as exc:
+                _raise(error_cls, str(exc), exc)
     signal = signal_cls(
         source=source, name=name, value=value, emitted_at=emitted_at, spec=signal_spec
     )
@@ -282,8 +294,14 @@ def coerce_typed_inputs(
     *,
     time_value: float = 0.0,
     error_cls: type[Exception] = RuntimeError,
+    recorder: Any = None,
+    module_name: str | None = None,
 ) -> dict[str, Any]:
-    """Coerce raw initial input values into typed BioSignal instances."""
+    """Coerce raw initial input values into typed BioSignal instances.
+
+    With a ``recorder`` (a ``CompatibilityRecorder``), contract checks are
+    recorded against ``module_name`` and a block raises ``CompatibilityError``.
+    """
 
     from biosim import BioSignal, SignalEnvelope
 
@@ -395,5 +413,7 @@ def coerce_typed_inputs(
             actual_unit=actual_unit,
             error_cls=error_cls,
             compatibility_envelope=compatibility_envelope,
+            recorder=recorder,
+            module_name=module_name,
         )
     return coerced

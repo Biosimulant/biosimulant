@@ -1,0 +1,23 @@
+schema_version: "2.0"
+title: "Compatibility fixture: emitter"
+description: "Emits a profiled protein sequence and an unprofiled note."
+standard: other
+biosim:
+  entrypoint: "src.emitter:Emitter"
+  communication_step: 1.0
+  execution_policy: once_before_run
+compatibility:
+  standard: biosimulant.model-compatibility
+  version: "0"
+io:
+  inputs: []
+  outputs:
+    - name: protein_sequence
+      signal_type: scalar
+      dtype: str
+      format: sequence
+      contract:
+        profile: protein.sequence/v1
+    - name: note
+      signal_type: scalar
+      dtype: str

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .__about__ import __version__
+from .compatibility import CompatibilityError
 from .pack import (
     PackageError,
     _current_python_minor,
@@ -25,6 +26,8 @@ BIOSIM_MANAGED_RUNTIME_CHILD_ENV = "BIOSIM_MANAGED_RUNTIME_CHILD"
 BIOSIM_RUNTIME_CACHE_ENV = "BIOSIM_RUNTIME_CACHE_DIR"
 BIOSIM_UV_PATH_ENV = "BIOSIM_UV_PATH"
 DEFAULT_RUNTIME_CACHE = Path.home() / ".cache" / "biosim" / "runtimes"
+_CHILD_ERROR_KEY = "biosimulant_child_error"
+_CHILD_COMPATIBILITY_EXIT = 2
 
 
 RunPackage = Callable[[str | Path], dict[str, Any]]
@@ -146,12 +149,19 @@ def run_child_package(
     install_deps: bool,
     dependency_root: str | Path | None = None,
 ) -> dict[str, Any]:
-    code = (
-        "import json, sys; "
-        "from biosim.pack import run_package; "
-        "root = sys.argv[3] if len(sys.argv) > 3 else None; "
-        "result = run_package(sys.argv[1], install_deps=(sys.argv[2] == '1'), dependency_root=root); "
-        "print(json.dumps(result, sort_keys=True))"
+    code = "\n".join(
+        [
+            "import json, sys",
+            "from biosim.pack import run_package",
+            "from biosim.compatibility import CompatibilityError",
+            "root = sys.argv[3] if len(sys.argv) > 3 else None",
+            "try:",
+            "    result = run_package(sys.argv[1], install_deps=(sys.argv[2] == '1'), dependency_root=root)",
+            "except CompatibilityError as exc:",
+            f"    print(json.dumps({{{_CHILD_ERROR_KEY!r}: exc.to_dict()}}, sort_keys=True))",
+            f"    sys.exit({_CHILD_COMPATIBILITY_EXIT})",
+            "print(json.dumps(result, sort_keys=True))",
+        ]
     )
     env = dict(os.environ)
     env[BIOSIM_MANAGED_RUNTIME_CHILD_ENV] = "1"
@@ -197,6 +207,10 @@ def run_child_package(
         reader.join()
     stdout = "".join(stdout_lines)
     stderr = "".join(stderr_lines)
+    if returncode == _CHILD_COMPATIBILITY_EXIT:
+        child_error = _child_compatibility_error(stdout)
+        if child_error is not None:
+            raise child_error
     if returncode != 0:
         raise PackageError(
             "Managed Python runtime failed to run the package.\n"
@@ -204,6 +218,22 @@ def run_child_package(
             f"stderr:\n{_tail(stderr)}"
         )
     return _parse_json_result(stdout)
+
+
+def _child_compatibility_error(stdout: str) -> CompatibilityError | None:
+    for line in reversed(stdout.splitlines()):
+        try:
+            parsed = json.loads(line.strip())
+        except json.JSONDecodeError:
+            continue
+        error = parsed.get(_CHILD_ERROR_KEY) if isinstance(parsed, dict) else None
+        if isinstance(error, dict) and error.get("code") == CompatibilityError.code:
+            compatibility = error.get("compatibility")
+            return CompatibilityError(
+                str(error.get("message") or "Compatibility check blocked the run."),
+                compatibility=compatibility if isinstance(compatibility, dict) else None,
+            )
+    return None
 
 
 def _relay_child_stream(

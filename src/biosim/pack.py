@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
+from .__about__ import __version__
+from ._errors import PackageError
 from .execution import (
     bind_manifest_execution_policy,
     declared_execution_policy,
@@ -71,10 +73,6 @@ _PACKAGE_SEGMENT_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 DependencyLogger = Callable[[str], None]
 CancelChecker = Callable[[], None]
 ProcessTracker = Callable[[subprocess.Popen[str]], Any]
-
-
-class PackageError(ValueError):
-    """Raised when a package is invalid or cannot be handled."""
 
 
 def _new_process_group_kwargs() -> dict[str, Any]:
@@ -267,6 +265,11 @@ def _is_exact_pin(dep: str) -> bool:
         and bool(right.strip())
         and all(op not in dep for op in (">=", "<=", "~=", "!=", ">", "<"))
     )
+
+
+def _is_runtime_distribution_pin(dep: str) -> bool:
+    name = re.split(r"[\[;=<>!~\s]", dep.strip(), maxsplit=1)[0]
+    return re.sub(r"[-_.]+", "-", name).lower() == "biosimulant"
 
 
 def _validate_dependencies(manifest: Mapping[str, Any]) -> None:
@@ -828,6 +831,16 @@ def validate_lab_source(path: str | Path) -> PackageValidationResult:
         if execution["errors"]:
             raise PackageError("; ".join(execution["errors"]))
         result.warnings.extend(execution["warnings"])
+        compatibility = static_lab_compatibility(source_path, manifest)
+        if compatibility is not None and compatibility["summary"]["blocked"]:
+            blocked = [
+                f"{wire['source']['module']}.{wire['source']['port']} -> "
+                f"{wire['target']['module']}.{wire['target']['port']}: "
+                + "; ".join(issue["message"] for issue in wire["issues"] if issue["level"] == "blocked")
+                for wire in compatibility["wires"]
+                if wire["mode"] == "blocked"
+            ]
+            raise PackageError("Incompatible wires: " + " | ".join(blocked))
         package_name, version = _validate_lab_release_identity(
             manifest,
             package_name_override=None,
@@ -847,10 +860,105 @@ def validate_lab_source(path: str | Path) -> PackageValidationResult:
             "source_format": "source-tree",
             "execution": execution["profile"],
         }
+        if compatibility is not None:
+            result.metadata["compatibility"] = compatibility
         return result
     except Exception as exc:
         result.errors.append(str(exc))
         return result
+
+
+def _declared_port_contracts(
+    port: Mapping[str, Any] | None,
+) -> tuple[Mapping[str, Any] | None, list[Mapping[str, Any]]]:
+    if not isinstance(port, Mapping):
+        return None, []
+    contract = port.get("contract") if isinstance(port.get("contract"), Mapping) else None
+    accepted = [
+        item["contract"]
+        for item in port.get("accepted_profiles") or []
+        if isinstance(item, Mapping) and isinstance(item.get("contract"), Mapping)
+    ]
+    return contract, accepted
+
+
+def static_lab_compatibility(
+    source_path: str | Path, manifest: Mapping[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Classify each wire of a source lab from model.yaml profiles, without running it.
+
+    Structure and values are checked when the lab runs. Labs with Hub package
+    children return ``None`` because their models are not available locally.
+    """
+
+    from .compatibility import (
+        CompatibilityIssue,
+        CompatibilityRecorder,
+        CompatibilityResult,
+        check_declared_contracts,
+    )
+
+    root = Path(source_path).expanduser().resolve()
+    lab_manifest = manifest if manifest is not None else _load_lab_manifest_from_dir(root)
+    if _package_children(lab_manifest):
+        return None
+    models, wiring, _parsed = _flatten_embedded_lab_dir(payload_root=root, current_lab_dir=root)
+    recorder = CompatibilityRecorder()
+    declared_ports: dict[tuple[str, str, str], Mapping[str, Any]] = {}
+    for entry in models:
+        alias = str(entry["alias"])
+        model_manifest = _load_model_manifest_from_dir(Path(str(entry["model_dir"])))
+        io = model_manifest.get("io") if isinstance(model_manifest.get("io"), Mapping) else {}
+        for direction in ("inputs", "outputs"):
+            ports = io.get(direction)
+            for port in ports if isinstance(ports, list) else []:
+                if not isinstance(port, Mapping) or not isinstance(port.get("name"), str):
+                    continue
+                declared_ports[(alias, direction, port["name"])] = port
+                contract, accepted = _declared_port_contracts(port)
+                recorder.record_declared_port(alias, direction, port["name"], contract, accepted)
+
+    for edge in wiring:
+        source_ref = str(edge["from"])
+        source_module, _, source_port = source_ref.rpartition(".")
+        source_decl = declared_ports.get((source_module, "outputs", source_port))
+        source_contract, _ = _declared_port_contracts(source_decl)
+        for target_ref in edge["to"]:
+            target_module, _, target_port = str(target_ref).rpartition(".")
+            target_decl = declared_ports.get((target_module, "inputs", target_port))
+            target_contract, accepted = _declared_port_contracts(target_decl)
+            if target_contract is None and len({repr(item) for item in accepted}) == 1:
+                target_contract = accepted[0]
+            checked = check_declared_contracts(source_contract, target_contract)
+            undeclared = [
+                ref
+                for ref, decl in ((source_ref, source_decl), (str(target_ref), target_decl))
+                if decl is None
+            ]
+            if undeclared:
+                checked = CompatibilityResult(
+                    checked.issues
+                    + (
+                        CompatibilityIssue(
+                            level="warning",
+                            code="PORT_NOT_DECLARED",
+                            message=(
+                                f"model.yaml does not declare {', '.join(undeclared)}; "
+                                "its profile is checked when the lab runs."
+                            ),
+                        ),
+                    )
+                )
+            recorder.record_declared_wire(
+                source_module,
+                source_port,
+                source_contract,
+                target_module,
+                target_port,
+                target_contract,
+                checked,
+            )
+    return recorder.to_dict()
 
 
 def _parse_checksums(text: str) -> dict[str, str]:
@@ -1077,6 +1185,18 @@ def inspect_lab_execution(path: str | Path) -> dict[str, Any]:
     }
 
 
+def _bind_compatibility_ports(module: BioModule, manifest: Mapping[str, Any]) -> None:
+    """Apply model.yaml port declarations, including contracts, to the module's specs."""
+
+    from .compatibility import bind_manifest_ports, manifest_has_compatibility_declarations
+
+    if manifest_has_compatibility_declarations(manifest):
+        try:
+            bind_manifest_ports(module, manifest)
+        except (TypeError, ValueError) as exc:
+            raise PackageError(f"model.yaml doesn't match the Python module: {exc}") from exc
+
+
 def _instantiate_model_from_package(
     loaded: _LoadedPackage, parameters: Mapping[str, Any] | None = None
 ) -> tuple[BioModule, dict[str, Any]]:
@@ -1107,13 +1227,7 @@ def _instantiate_model_from_package(
     if not isinstance(module, BioModule):
         raise PackageError(f"Entrypoint {entrypoint} did not construct a BioModule")
     _bind_execution_policy(module, manifest)
-    from .compatibility import bind_manifest_ports, manifest_has_compatibility_declarations
-
-    if manifest_has_compatibility_declarations(manifest):
-        try:
-            bind_manifest_ports(module, manifest)
-        except (TypeError, ValueError) as exc:
-            raise PackageError(f"model.yaml doesn't match the Python module: {exc}") from exc
+    _bind_compatibility_ports(module, manifest)
     return module, {
         "communication_step": bsim_block.get("communication_step"),
         "setup": (
@@ -1273,6 +1387,7 @@ def _instantiate_model_from_dir(
     if not isinstance(module, BioModule):
         raise PackageError(f"Entrypoint {entrypoint} did not construct a BioModule")
     _bind_execution_policy(module, manifest)
+    _bind_compatibility_ports(module, manifest)
     return module, {
         "communication_step": bsim_block.get("communication_step"),
         "setup": (
@@ -1372,6 +1487,16 @@ def _validate_embedded_lab_package_dir(
         )
 
 
+def _declared_input_specs(module: BioModule) -> Mapping[str, Any]:
+    """Input specs a run applies: model.yaml-bound specs when the model has them."""
+
+    manifest_inputs = getattr(module, "_biosimulant_manifest_input_specs", None)
+    if isinstance(manifest_inputs, Mapping):
+        return manifest_inputs
+    declared = module.inputs()
+    return declared if isinstance(declared, dict) else {}
+
+
 def _run_model_loaded_package(
     loaded: _LoadedPackage,
     *,
@@ -1405,16 +1530,10 @@ def _run_model_loaded_package(
         else {}
     )
     if initial_inputs:
-        manifest_inputs = getattr(module, "_biosimulant_manifest_input_specs", None)
-        declared_inputs = (
-            manifest_inputs
-            if isinstance(manifest_inputs, Mapping)
-            else module.inputs() if isinstance(module.inputs(), dict) else {}
-        )
         module.set_inputs(
             coerce_typed_inputs(
                 initial_inputs,
-                declared_inputs,
+                _declared_input_specs(module),
                 source="run",
                 time_value=0.0,
                 error_cls=PackageError,
@@ -1620,14 +1739,15 @@ def _prepare_lab_loaded_package(
             )
             if not alias_inputs:
                 continue
-            declared_inputs = module.inputs() if isinstance(module.inputs(), dict) else {}
             module.set_inputs(
                 coerce_typed_inputs(
                     alias_inputs,
-                    declared_inputs,
+                    _declared_input_specs(module),
                     source="run",
                     time_value=0.0,
                     error_cls=PackageError,
+                    recorder=world.compatibility,
+                    module_name=alias,
                 )
             )
         return LabPackageRuntime(
@@ -1725,14 +1845,15 @@ def _prepare_lab_loaded_package(
         )
         if not alias_inputs:
             continue
-        declared_inputs = module.inputs() if isinstance(module.inputs(), dict) else {}
         module.set_inputs(
             coerce_typed_inputs(
                 alias_inputs,
-                declared_inputs,
+                _declared_input_specs(module),
                 source="run",
                 time_value=0.0,
                 error_cls=PackageError,
+                recorder=world.compatibility,
+                module_name=alias,
             )
         )
     return LabPackageRuntime(
@@ -1771,6 +1892,8 @@ def _run_lab_loaded_package(
     world.run(duration=duration)
     if settle_steps:
         world.settle(settle_steps)
+    # A blocked value raises CompatibilityError carrying the partial record;
+    # a completed run always carries the full record, even with no profiles.
     outputs = {
         module_name: {
             port_name: signal.to_dict()
@@ -1789,6 +1912,7 @@ def _run_lab_loaded_package(
         "modules": prepared.modules,
         "outputs": outputs,
         "visuals": world.collect_visuals(),
+        "compatibility": world.compatibility.to_dict(),
     }
 
 
@@ -1885,6 +2009,22 @@ def _install_declared_dependencies(
     ]
     if bad:
         raise PackageError(f"All dependencies must use exact pins: {bad}")
+    runtime_pins = [dep for dep in packages if _is_runtime_distribution_pin(dep)]
+    if runtime_pins:
+        # Models run inside the interpreter of the runtime orchestrating them.
+        # Installing another biosimulant there would replace that runtime
+        # mid-run and in any cached managed-runtime venv.
+        notice = (
+            f"Using the running Biosimulant runtime {__version__}; "
+            f"not installing {', '.join(runtime_pins)} into this interpreter."
+        )
+        if dependency_logger is not None:
+            dependency_logger(notice)
+        else:
+            print(notice, file=sys.stderr, flush=True)
+        packages = [dep for dep in packages if dep not in runtime_pins]
+        if not packages:
+            return
     _ensure_interpreter_scripts_on_path()
     command = _dependency_install_command(packages)
     if cancel_checker is not None:

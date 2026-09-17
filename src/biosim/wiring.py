@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
 from .modules import BioModule
-from .signals import SignalSpec, validate_connection_specs, validate_port_spec_direction
+from .signals import SignalSpec, validate_port_spec_direction
 from .world import BioWorld
 
 
@@ -80,7 +80,8 @@ class WiringBuilder:
                         f"connect {src_ref} -> {dst_ref}: module '{dst_name}' has no input port '{dst_port}'. "
                         f"Declared inputs: {sorted(declared_in)}"
                     )
-                validate_connection_specs(declared_out[src_port], declared_in[dst_port])
+                # BioWorld.connect checks and records the wire using any
+                # manifest-bound port specs, which may carry model.yaml contracts.
                 self.world.connect(f"{src_name}.{src_port}", f"{dst_name}.{dst_port}")
         self._pending_connections.clear()
 

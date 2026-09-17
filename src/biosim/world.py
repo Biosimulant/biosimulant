@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import inspect
 import logging
@@ -9,6 +9,7 @@ import threading
 import warnings
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
+from .compatibility import CompatibilityRecorder, check_compatibility, enforce_result
 from .execution import (
     execution_phase_findings,
     has_manifest_execution_policy,
@@ -73,6 +74,7 @@ class Connection:
     target_signal: str
     last_event_time: Optional[float] = None
     last_stale_warning_time: Optional[float] = None
+    last_checked_signal: Optional[BioSignal] = field(default=None, repr=False, compare=False)
 
 
 class BioWorld:
@@ -93,6 +95,7 @@ class BioWorld:
         self._active_run_end: Optional[float] = None
         self._setup_config: Dict[str, Dict[str, Any]] = {}
         self._completed_once: set[str] = set()
+        self.compatibility = CompatibilityRecorder()
 
         self._stop_requested: bool = False
         self._run_event = threading.Event()
@@ -159,6 +162,9 @@ class BioWorld:
             module_name=name,
         )
         execution_policy, execution_contract = self._validate_module_execution_contract(name, module)
+        for direction, specs in (("input", input_specs), ("output", output_specs)):
+            for port, spec in specs.items():
+                self.compatibility.record_port(name, direction, port, spec)
 
         try:
             setattr(module, "_world_name", name)
@@ -304,7 +310,12 @@ class BioWorld:
             raise KeyError(f"Unknown source signal '{src_mod}.{src_sig}'")
         if dst_sig not in dst_entry.input_specs:
             raise KeyError(f"Unknown target signal '{dst_mod}.{dst_sig}'")
-        validate_connection_specs(src_entry.output_specs[src_sig], dst_entry.input_specs[dst_sig])
+        validate_connection_specs(
+            src_entry.output_specs[src_sig],
+            dst_entry.input_specs[dst_sig],
+            recorder=self.compatibility,
+            identity=(src_mod, src_sig, dst_mod, dst_sig),
+        )
 
         conn = Connection(
             source_module=src_mod,
@@ -350,6 +361,7 @@ class BioWorld:
             compatibility_envelope = getattr(signal, "compatibility_envelope", None)
             if isinstance(compatibility_envelope, SignalEnvelope):
                 compatibility_envelope.validate_contract(declared[port].contract)
+            self._check_output_value(module_name, port, declared[port], signal.value)
             bound = signal.with_spec(declared[port]) if signal.spec is None else signal.with_spec(declared[port])
             if bound.source != module_name:
                 previous = bound
@@ -395,6 +407,7 @@ class BioWorld:
                 payload = compatibility_envelope.payload
             else:
                 payload = value.value if isinstance(value, BioSignal) else value
+            self._check_output_value(module_name, port, declared[port], payload)
             signal = make_signal(
                 declared[port],
                 source=module_name,
@@ -406,6 +419,19 @@ class BioWorld:
                 signal.compatibility_envelope = compatibility_envelope
             normalized[port] = signal
         return normalized
+
+    def _check_output_value(self, module_name: str, port: str, spec: SignalSpec, value: Any) -> None:
+        if spec.contract is None:
+            return
+        result = self.compatibility.check_output(
+            module_name, port, spec.contract, value, sim_time=self._current_time
+        )
+        if result is not None:
+            enforce_result(
+                result,
+                context=f"Output '{module_name}.{port}'",
+                recorder=self.compatibility,
+            )
 
     def _commit_outputs(self, module_name: str, outputs: Mapping[str, BioSignal]) -> None:
         if not outputs:
@@ -455,13 +481,25 @@ class BioWorld:
                 continue
             target_spec = entry.input_specs[conn.target_signal]
             source_spec = self._modules[conn.source_module].output_specs[conn.source_signal]
-            validate_connection_specs(
-                source_spec,
-                target_spec,
-                sample=source_signal.value,
-                check_sample=True,
-                suppressed_warning_codes=("PROFILE_PARTIAL",),
-            )
+            if conn.last_checked_signal is not source_signal:
+                # Each committed output is a new signal object, so a value is
+                # checked once per wire rather than on every window it is read.
+                result = check_compatibility(source_spec, target_spec, sample=source_signal.value)
+                self.compatibility.record_value_check(
+                    "wire_value",
+                    conn.target_module,
+                    conn.target_signal,
+                    f"{conn.source_module}.{conn.source_signal}",
+                    result,
+                    start,
+                )
+                enforce_result(
+                    result,
+                    context="incompatible ports",
+                    suppressed_warning_codes=("PROFILE_PARTIAL",),
+                    recorder=self.compatibility,
+                )
+                conn.last_checked_signal = source_signal
             self._warn_if_input_stale(conn, source_signal, target_spec, start)
             if source_signal.kind == "event":
                 if conn.last_event_time is not None and source_signal.emitted_at <= conn.last_event_time:

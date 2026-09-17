@@ -1,0 +1,19 @@
+schema_version: "2.0"
+title: "Compatibility record fixture"
+description: "Three tiny models giving one verified, one partial and one structural wire."
+models:
+  - alias: emitter
+    path: models/emitter
+  - alias: consumer
+    path: models/consumer
+  - alias: sink
+    path: models/sink
+runtime:
+  communication_step: 1.0
+  duration: 1.0
+  initial_inputs: {}
+wiring:
+  - from: emitter.protein_sequence
+    to: [consumer.protein_sequence, sink.protein_sequence]
+  - from: emitter.note
+    to: [consumer.note]

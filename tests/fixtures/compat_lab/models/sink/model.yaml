@@ -1,0 +1,18 @@
+schema_version: "2.0"
+title: "Compatibility fixture: sink"
+description: "Accepts a protein sequence without declaring a profile."
+standard: other
+biosim:
+  entrypoint: "src.sink:Sink"
+  communication_step: 1.0
+  execution_policy: once_before_run
+io:
+  inputs:
+    - name: protein_sequence
+      signal_type: scalar
+      dtype: str
+      format: sequence
+  outputs:
+    - name: received
+      signal_type: scalar
+      dtype: float64

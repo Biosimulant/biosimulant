@@ -1,0 +1,26 @@
+schema_version: "2.0"
+title: "Compatibility fixture: consumer"
+description: "Consumes a profiled protein sequence and an unprofiled note."
+standard: other
+biosim:
+  entrypoint: "src.consumer:Consumer"
+  communication_step: 1.0
+  execution_policy: once_before_run
+compatibility:
+  standard: biosimulant.model-compatibility
+  version: "0"
+io:
+  inputs:
+    - name: protein_sequence
+      signal_type: scalar
+      dtype: str
+      format: sequence
+      contract:
+        profile: protein.sequence/v1
+    - name: note
+      signal_type: scalar
+      dtype: str
+  outputs:
+    - name: length
+      signal_type: scalar
+      dtype: float64

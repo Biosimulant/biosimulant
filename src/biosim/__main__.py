@@ -50,6 +50,7 @@ from .__about__ import __version__
 from ._starter import write_starter_model
 from .labs_serve import serve_lab
 from .execution_capabilities import inspect_local_execution_capability
+from .compatibility import CompatibilityError
 from .managed_runtime import (
     run_labs_serve_with_managed_python,
     run_package_with_managed_python,
@@ -914,6 +915,11 @@ def _main_labs(argv: list[str], *, prog: str = "biosimulant labs") -> None:
                     emit_json=args.json_output,
                 )
             return
+    except CompatibilityError as exc:
+        if args.command == "run" and getattr(args, "results_file", None):
+            _write_compatibility_failure_results(args.results_file, exc)
+        _print_compatibility_error(exc, json_output=getattr(args, "json_output", False))
+        raise SystemExit(2) from exc
     except PackageError as exc:
         _print_pack_error(exc, json_output=getattr(args, "json_output", False))
         raise SystemExit(1) from exc
@@ -976,6 +982,9 @@ def _main_packages(argv: list[str], *, prog: str = "biosimulant packages") -> No
             result = _run_package_for_cli(args.package_file, **run_kwargs)
             _print_run_result(args.package_file, result, json_output=args.json_output)
             return
+    except CompatibilityError as exc:
+        _print_compatibility_error(exc, json_output=getattr(args, "json_output", False))
+        raise SystemExit(2) from exc
     except PackageError as exc:
         _print_pack_error(exc, json_output=getattr(args, "json_output", False))
         raise SystemExit(1) from exc
@@ -1068,6 +1077,9 @@ def _main_pack(argv: list[str], *, prog: str = "biosimulant pack") -> None:
             result = _run_package_for_cli(args.package_file, **run_kwargs)
             _print_run_result(args.package_file, result, json_output=args.json_output)
             return
+    except CompatibilityError as exc:
+        _print_compatibility_error(exc, json_output=args.json_output)
+        raise SystemExit(2) from exc
     except PackageError as exc:
         _print_pack_error(exc, json_output=args.json_output)
         raise SystemExit(1) from exc
@@ -1685,10 +1697,19 @@ def _print_lab_validation_success(package_file: Path, result: Any, *, json_outpu
         "warnings": result.warnings,
         "metadata": result.metadata,
     }
+    compatibility = result.metadata.get("compatibility") if result.metadata else None
+    if compatibility is not None:
+        payload["compatibility"] = compatibility
     if json_output:
         print(json_dumps(payload))
         return
     print("Biosimulant lab validation passed.")
+    if isinstance(compatibility, dict):
+        summary = compatibility["summary"]
+        print(
+            f"Wires: {summary['verified']} verified, {summary['partial']} partial, "
+            f"{summary['structural']} structural"
+        )
     print(f"Lab: {package_file}")
     if result.metadata:
         print(f"Package: {result.metadata.get('package')}@{result.metadata.get('version')}")
@@ -1879,6 +1900,33 @@ def _write_run_report(
 """
     report_file.parent.mkdir(parents=True, exist_ok=True)
     report_file.write_text(document, encoding="utf-8")
+
+
+def _write_compatibility_failure_results(results_file: Path, exc: CompatibilityError) -> None:
+    payload: dict[str, Any] = {
+        "status": "failed",
+        "error": {"code": exc.code, "message": str(exc)},
+    }
+    if exc.compatibility is not None:
+        payload["compatibility"] = exc.compatibility
+    results_file.parent.mkdir(parents=True, exist_ok=True)
+    results_file.write_text(json_dumps(payload) + "\n", encoding="utf-8")
+
+
+def _print_compatibility_error(exc: CompatibilityError, *, json_output: bool) -> None:
+    if json_output:
+        print(json_dumps({"error": exc.to_dict()}), file=sys.stderr)
+        return
+    print("Biosimulant compatibility check blocked the run.", file=sys.stderr)
+    print(f"Error: {exc}", file=sys.stderr)
+    summary = (exc.compatibility or {}).get("summary")
+    if isinstance(summary, dict):
+        print(
+            "Wires: "
+            f"{summary.get('verified', 0)} verified, {summary.get('partial', 0)} partial, "
+            f"{summary.get('structural', 0)} structural, {summary.get('blocked', 0)} blocked",
+            file=sys.stderr,
+        )
 
 
 def _print_pack_error(exc: Exception, *, json_output: bool) -> None:
