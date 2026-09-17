@@ -83,7 +83,7 @@ def test_root_version_flag(capsys) -> None:
         main(["--version"], prog="biosimulant")
 
     assert exc_info.value.code == 0
-    assert capsys.readouterr().out.strip() == "biosimulant 0.0.31"
+    assert capsys.readouterr().out.strip() == "biosimulant 0.0.32"
 
 
 def test_labs_serve_uses_local_lab_ui_without_desktop(tmp_path: Path) -> None:

@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.32] - 2026-09-17
+
+### Changed
+
+- Relay a managed runtime child process's output to stderr line by line while
+  the lab runs, instead of only after it exits, so hosted runs show logs and
+  progress for labs that need a different Python version.
+
 ## [0.0.31] - 2026-09-17
 
 ### Fixed
