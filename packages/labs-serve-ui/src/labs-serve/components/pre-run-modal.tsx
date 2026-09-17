@@ -23,6 +23,19 @@ export type PreRunModalProps = {
   onSubmit: (payload: PreRunSubmit) => void | Promise<void>;
 };
 
+function runtimeDefault(value: unknown): string {
+  return typeof value === "number" ? String(value) : "";
+}
+
+function timeSettingsNote(lab: LocalLab): string | null {
+  const execution = lab.execution;
+  if (!execution || execution.timing !== "temporal") return null;
+  const policies = Object.entries(execution.policies ?? {});
+  const eachWindow = policies.filter(([, policy]) => policy === "each_window").map(([alias]) => alias);
+  const hasOnce = policies.some(([, policy]) => policy === "once_before_run" || policy === "once_after_run");
+  return hasOnce && eachWindow.length > 0 ? `Time settings apply to: ${eachWindow.join(", ")}.` : null;
+}
+
 function inferDefault(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -111,16 +124,12 @@ export function PreRunModal({ lab, busy, onCancel, onSubmit }: PreRunModalProps)
   const worldInputs: WorldIoPort[] = lab.manifest.io?.inputs ?? [];
   const models: LabModelEntry[] = lab.manifest.models ?? [];
   const computeWarnings = lab.compute_warnings ?? [];
+  const runsOnce = lab.execution?.timing === "finite";
+  const mixedNote = timeSettingsNote(lab);
 
-  const [duration, setDuration] = React.useState<string>(() =>
-    typeof runtime.duration === "number" ? String(runtime.duration) : "",
-  );
-  const [step, setStep] = React.useState<string>(() =>
-    typeof runtime.communication_step === "number" ? String(runtime.communication_step) : "",
-  );
-  const [settleSteps, setSettleSteps] = React.useState<string>(() =>
-    typeof runtime.settle_steps === "number" ? String(runtime.settle_steps) : "",
-  );
+  const [duration, setDuration] = React.useState<string>(() => runtimeDefault(runtime.duration));
+  const [step, setStep] = React.useState<string>(() => runtimeDefault(runtime.communication_step));
+  const [settleSteps, setSettleSteps] = React.useState<string>(() => runtimeDefault(runtime.settle_steps));
   const [inputValues, setInputValues] = React.useState<Record<string, string>>(() => {
     const seed: Record<string, string> = {};
     for (const port of worldInputs) {
@@ -175,24 +184,27 @@ export function PreRunModal({ lab, busy, onCancel, onSubmit }: PreRunModalProps)
       if (Object.keys(overlay).length > 0) perModel[model.alias] = overlay;
     }
 
+    // Only values the user changed are sent; the run falls back to lab.yaml for the rest.
     const config: PreRunSubmit["simulation_config"] = {};
-    if (duration.trim().length > 0) {
+    const changed = (text: string, fallback: unknown) =>
+      !runsOnce && text.trim().length > 0 && text.trim() !== runtimeDefault(fallback);
+    if (changed(duration, runtime.duration)) {
       const num = Number(duration);
-      if (!Number.isFinite(num)) {
-        setError("Duration must be a number.");
+      if (!Number.isFinite(num) || num <= 0) {
+        setError("Duration must be a positive number.");
         return null;
       }
       config.duration = num;
     }
-    if (step.trim().length > 0) {
+    if (changed(step, runtime.communication_step)) {
       const num = Number(step);
-      if (!Number.isFinite(num)) {
-        setError("Communication step must be a number.");
+      if (!Number.isFinite(num) || num <= 0) {
+        setError("Communication step must be a positive number.");
         return null;
       }
       config.communication_step = num;
     }
-    if (settleSteps.trim().length > 0) {
+    if (changed(settleSteps, runtime.settle_steps)) {
       const num = Number(settleSteps);
       if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) {
         setError("Settle steps must be a non-negative integer.");
@@ -235,7 +247,11 @@ export function PreRunModal({ lab, busy, onCancel, onSubmit }: PreRunModalProps)
           </button>
         </div>
         <div className="modal-body">
+          {runsOnce ? (
+            <p className="modal-note">This lab runs once, so duration and communication step don't apply.</p>
+          ) : (
           <CollapsibleSection title="Runtime" defaultOpen>
+            {mixedNote ? <p className="modal-note">{mixedNote}</p> : null}
             <div className="modal-grid">
               <label className="modal-param">
                 <span>Duration</span>
@@ -259,6 +275,7 @@ export function PreRunModal({ lab, busy, onCancel, onSubmit }: PreRunModalProps)
               </label>
             </div>
           </CollapsibleSection>
+          )}
 
           {computeWarnings.length > 0 ? (
             <div className="modal-compute-warnings" role="alert">

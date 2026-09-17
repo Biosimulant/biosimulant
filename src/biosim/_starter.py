@@ -14,6 +14,7 @@ version: 0.1.0
 biosim:
   entrypoint: "src.hello:HelloModule"
   communication_step: 1.0
+  execution_policy: each_window
 """
 
 _STARTER_MODEL_SOURCE = '''from biosimulant import BioModule, ExecutionContext, ExecutionPolicy, SignalSpec

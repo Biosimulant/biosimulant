@@ -1,0 +1,322 @@
+{
+  "description": "Conformance cases for Biosimulant execution-policy rules. Generated from biosim.execution; any port of these rules (for example the backend API) must produce the same results.",
+  "profiles": [
+    {
+      "policies": {
+        "a": "once_before_run",
+        "b": "once_after_run"
+      },
+      "expected": {
+        "timing": "finite",
+        "undeclared": []
+      }
+    },
+    {
+      "policies": {
+        "a": "once_before_run",
+        "b": "each_window"
+      },
+      "expected": {
+        "timing": "temporal",
+        "undeclared": []
+      }
+    },
+    {
+      "policies": {
+        "a": null,
+        "b": "each_window"
+      },
+      "expected": {
+        "timing": "temporal",
+        "undeclared": [
+          "a"
+        ]
+      }
+    },
+    {
+      "policies": {
+        "a": null,
+        "b": "once_before_run"
+      },
+      "expected": {
+        "timing": "unknown",
+        "undeclared": [
+          "a"
+        ]
+      }
+    },
+    {
+      "policies": {
+        "a": null
+      },
+      "expected": {
+        "timing": "unknown",
+        "undeclared": [
+          "a"
+        ]
+      }
+    },
+    {
+      "policies": {},
+      "expected": {
+        "timing": "unknown",
+        "undeclared": []
+      }
+    }
+  ],
+  "phase_findings": [
+    {
+      "policies": {
+        "prep": "once_before_run",
+        "sim": "each_window",
+        "report": "once_after_run"
+      },
+      "wiring": [
+        {
+          "from": "prep.score",
+          "to": [
+            "sim.x"
+          ]
+        },
+        {
+          "from": "sim.out",
+          "to": [
+            "report.y"
+          ]
+        }
+      ],
+      "expected_findings": []
+    },
+    {
+      "policies": {
+        "prep": "once_before_run",
+        "sim": "each_window"
+      },
+      "wiring": [
+        {
+          "from": "sim.out",
+          "to": [
+            "prep.x"
+          ]
+        }
+      ],
+      "expected_findings": [
+        "invalid execution phase edge: sim (each_window) -> prep (once_before_run)"
+      ]
+    },
+    {
+      "policies": {
+        "left": "once_after_run",
+        "right": "once_after_run"
+      },
+      "wiring": [
+        {
+          "from": "left.a",
+          "to": [
+            "right.a"
+          ]
+        },
+        {
+          "from": "right.b",
+          "to": [
+            "left.b"
+          ]
+        }
+      ],
+      "expected_findings": [
+        "once_after_run modules contain a dependency cycle: left, right"
+      ]
+    },
+    {
+      "policies": {
+        "left": "each_window",
+        "right": "each_window"
+      },
+      "wiring": [
+        {
+          "from": "left.a",
+          "to": [
+            "right.a"
+          ]
+        },
+        {
+          "from": "right.b",
+          "to": [
+            "left.b"
+          ]
+        }
+      ],
+      "expected_findings": []
+    },
+    {
+      "policies": {
+        "sim": "each_window",
+        "prep": null
+      },
+      "wiring": [
+        {
+          "from": "sim.out",
+          "to": [
+            "prep.x"
+          ]
+        }
+      ],
+      "expected_findings": []
+    },
+    {
+      "policies": {
+        "child.prep": "once_after_run",
+        "report": "once_before_run"
+      },
+      "wiring": [
+        {
+          "from": "child.prep.score",
+          "to": [
+            "report.score"
+          ]
+        }
+      ],
+      "expected_findings": [
+        "invalid execution phase edge: child.prep (once_after_run) -> report (once_before_run)"
+      ]
+    }
+  ],
+  "source_readings": [
+    {
+      "source": "from biosimulant import BioModule, ExecutionPolicy\nclass M(BioModule):\n    execution_policy = ExecutionPolicy.ONCE_BEFORE_RUN\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "once_before_run"
+      }
+    },
+    {
+      "source": "import biosimulant\nclass M(biosimulant.BioModule):\n    execution_policy = biosimulant.ExecutionPolicy.ONCE_AFTER_RUN\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "once_after_run"
+      }
+    },
+    {
+      "source": "class M(BioModule):\n    execution_policy = 'each_window'\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "each_window"
+      }
+    },
+    {
+      "source": "class M(BioModule):\n    def execute(self, inputs, *, context):\n        return {}\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "each_window"
+      }
+    },
+    {
+      "source": "class M(BioModule):\n    def advance_window(self, start, end):\n        return None\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "each_window"
+      }
+    },
+    {
+      "source": "class Base(BioModule):\n    execution_policy = ExecutionPolicy.ONCE_BEFORE_RUN\nclass M(Base):\n    pass\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "once_before_run"
+      }
+    },
+    {
+      "source": "class M(BioModule):\n    def __init__(self):\n        self.execution_policy = ExecutionPolicy.ONCE_BEFORE_RUN\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "once_before_run"
+      }
+    },
+    {
+      "source": "class M(BioModule):\n    execution_policy = ExecutionPolicy.ONCE_BEFORE_RUN\n    def __init__(self, mode='once'):\n        if mode == 'stream':\n            self.execution_policy = ExecutionPolicy.EACH_WINDOW\n",
+      "class_name": "M",
+      "expected": {
+        "status": "dynamic",
+        "policy": null
+      }
+    },
+    {
+      "source": "class M(BioModule):\n    execution_policy = POLICY\n",
+      "class_name": "M",
+      "expected": {
+        "status": "dynamic",
+        "policy": null
+      }
+    },
+    {
+      "source": "class M(OnnxBioModule):\n    pass\n",
+      "class_name": "M",
+      "expected": {
+        "status": "unknown",
+        "policy": null
+      }
+    },
+    {
+      "source": "class Other(BioModule):\n    pass\n",
+      "class_name": "M",
+      "expected": {
+        "status": "unknown",
+        "policy": null
+      }
+    },
+    {
+      "source": "class M(:\n",
+      "class_name": "M",
+      "expected": {
+        "status": "unknown",
+        "policy": null
+      }
+    },
+    {
+      "source": "from biosimulant import StatefulBioModule\nclass M(StatefulBioModule):\n    pass\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "each_window"
+      }
+    },
+    {
+      "source": "from biosimulant.modules import SignalEmitterBioModule as Emitter\nclass M(Emitter):\n    def execute(self, inputs, *, context):\n        return {}\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "each_window"
+      }
+    },
+    {
+      "source": "import biosimulant as bs\nclass M(bs.contrib.sbml.TelluriumSBMLBioModule):\n    pass\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "each_window"
+      }
+    },
+    {
+      "source": "from biosimulant import StatefulBioModule\nclass M(StatefulBioModule):\n    execution_policy = 'once_before_run'\n",
+      "class_name": "M",
+      "expected": {
+        "status": "resolved",
+        "policy": "once_before_run"
+      }
+    },
+    {
+      "source": "from mylib import StatefulBioModule\nclass M(StatefulBioModule):\n    pass\n",
+      "class_name": "M",
+      "expected": {
+        "status": "unknown",
+        "policy": null
+      }
+    }
+  ]
+}

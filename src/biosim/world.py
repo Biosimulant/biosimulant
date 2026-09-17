@@ -9,6 +9,11 @@ import threading
 import warnings
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
+from .execution import (
+    execution_phase_findings,
+    has_manifest_execution_policy,
+    resolve_execution_policy,
+)
 from .modules import BioModule, ExecutionContext, ExecutionPolicy
 from .signals import (
     BioSignal,
@@ -174,10 +179,9 @@ class BioWorld:
         name: str,
         module: BioModule,
     ) -> tuple[ExecutionPolicy, _ModuleExecutionContract]:
-        raw_policy = getattr(module, "execution_policy", ExecutionPolicy.EACH_WINDOW)
         try:
-            policy = ExecutionPolicy(raw_policy)
-        except (TypeError, ValueError) as exc:
+            policy = resolve_execution_policy(module)
+        except ValueError as exc:
             allowed = ", ".join(item.value for item in ExecutionPolicy)
             raise ValueError(
                 f"Module '{name}' execution_policy must be one of: {allowed}"
@@ -212,6 +216,8 @@ class BioWorld:
 
     @staticmethod
     def _has_explicit_execution_policy(module: BioModule) -> bool:
+        if has_manifest_execution_policy(module):
+            return True
         instance_dict = getattr(module, "__dict__", {})
         if "execution_policy" in instance_dict:
             return True
@@ -560,53 +566,22 @@ class BioWorld:
                 entry.module._restore_execution_outputs(outputs)
 
     def _validate_execution_graph(self) -> None:
-        rank = {
-            ExecutionPolicy.ONCE_BEFORE_RUN: 0,
-            ExecutionPolicy.EACH_WINDOW: 1,
-            ExecutionPolicy.ONCE_AFTER_RUN: 2,
-        }
-        phase_edges: dict[ExecutionPolicy, dict[str, set[str]]] = {
-            ExecutionPolicy.ONCE_BEFORE_RUN: {},
-            ExecutionPolicy.ONCE_AFTER_RUN: {},
-        }
+        findings = execution_phase_findings(
+            self.execution_policies,
+            (
+                (conn.source_module, target)
+                for target, connections in self._connections_by_target.items()
+                for conn in connections
+            ),
+        )
+        if findings:
+            raise ValueError(findings[0])
 
-        for target, connections in self._connections_by_target.items():
-            target_policy = self._modules[target].execution_policy
-            for conn in connections:
-                source_policy = self._modules[conn.source_module].execution_policy
-                if rank[source_policy] > rank[target_policy]:
-                    raise ValueError(
-                        "invalid execution phase edge: "
-                        f"{conn.source_module} ({source_policy.value}) -> "
-                        f"{target} ({target_policy.value})"
-                    )
-                if source_policy is target_policy and source_policy in phase_edges:
-                    phase_edges[source_policy].setdefault(conn.source_module, set()).add(target)
+    @property
+    def execution_policies(self) -> Dict[str, ExecutionPolicy]:
+        """Resolved invocation policy for each registered module, in registration order."""
 
-        for policy, edges in phase_edges.items():
-            nodes = {
-                name
-                for name, entry in self._modules.items()
-                if entry.execution_policy is policy
-            }
-            indegree = {name: 0 for name in nodes}
-            for targets in edges.values():
-                for target in targets:
-                    indegree[target] += 1
-            ready = [name for name in self._modules if name in nodes and indegree[name] == 0]
-            visited = 0
-            while ready:
-                name = ready.pop(0)
-                visited += 1
-                for target in edges.get(name, set()):
-                    indegree[target] -= 1
-                    if indegree[target] == 0:
-                        ready.append(target)
-            if visited != len(nodes):
-                cyclic = [name for name in self._modules if name in nodes and indegree[name] > 0]
-                raise ValueError(
-                    f"{policy.value} modules contain a dependency cycle: {', '.join(cyclic)}"
-                )
+        return {name: entry.execution_policy for name, entry in self._modules.items()}
 
     def _drain_once_phase(self, policy: ExecutionPolicy, timestamp: float) -> None:
         if self._active_run_start is None or self._active_run_end is None:
@@ -686,11 +661,36 @@ class BioWorld:
         try:
             self._drain_once_phase(ExecutionPolicy.ONCE_BEFORE_RUN, self._current_time)
 
+            has_each_window = any(
+                entry.execution_policy is ExecutionPolicy.EACH_WINDOW
+                for entry in self._modules.values()
+            )
             has_canonical_each_window = any(
                 entry.execution_policy is ExecutionPolicy.EACH_WINDOW
                 and entry.execution_contract is _ModuleExecutionContract.CANONICAL_EXECUTE
                 for entry in self._modules.values()
             )
+
+            if not has_each_window and self._current_time < end_time - eps:
+                # No module consumes communication windows, so stepping through
+                # them would only emit empty turns. Cross the run in one step.
+                if self._stop_requested:
+                    raise SimulationStop()
+                self._run_event.wait()
+                if self._stop_requested:
+                    raise SimulationStop()
+                window_start = self._current_time
+                self._last_published_refs = set()
+                self._current_time = end_time
+                self._emit(
+                    WorldEvent.STEP,
+                    {
+                        "t": self._current_time,
+                        "window_start": window_start,
+                        "window_end": end_time,
+                        **self._progress_payload(self._current_time),
+                    },
+                )
 
             while self._current_time < end_time - eps:
                 if self._stop_requested:

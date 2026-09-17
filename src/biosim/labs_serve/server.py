@@ -25,12 +25,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from biosim.execution import unknown_lab_execution
 from biosim.pack import (
     PackageError,
     _local_lab_release_identity,
     _safe_yaml_dump,
     _safe_yaml_load,
     build_package,
+    inspect_lab_execution,
     prepare_lab_package,
 )
 from biosim.run_overrides import (
@@ -268,6 +270,14 @@ def _gpu_warning_message(*, alias: str, parameter: str, value: str) -> str:
         "The run will continue with the lab's configured accelerator."
         f" Host: {host}."
     )
+
+
+def _execution_profile_for_lab(lab_path: Path) -> dict[str, Any]:
+    try:
+        return inspect_lab_execution(lab_path)["profile"]
+    except Exception:
+        # An unreadable lab keeps today's Run dialog rather than failing the page.
+        return unknown_lab_execution().to_dict()
 
 
 def _compute_warnings_for_manifest(manifest: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -931,6 +941,7 @@ class LabServeSession:
         manifest = _load_lab_manifest(self.lab_path)
         enriched_manifest = self._enriched_manifest(manifest)
         compute_warnings = _compute_warnings_for_manifest(manifest)
+        execution = _execution_profile_for_lab(self.lab_path)
         self._ensure_runtime_metadata()
         runtime_status = self._runtime_metadata_snapshot()
         metadata = record.metadata or {}
@@ -943,6 +954,7 @@ class LabServeSession:
             "file_path": str(record.path),
             "manifest": enriched_manifest,
             "compute_warnings": compute_warnings,
+            "execution": execution,
             "wiring_layout": _load_wiring_layout(self.lab_path),
             "runtime_metadata_status": runtime_status["status"],
             "runtime_metadata_error": runtime_status["error"],

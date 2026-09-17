@@ -114,7 +114,34 @@ optional positive `window_start`/`window_end`, and a derived `simulated_time`.
 Calling inherited `advance_window()` directly on a canonical module is rejected;
 invoke it through BioWorld. After a successful commit, `module.get_outputs()`
 returns the latest normalized canonical result. A zero-duration `run()` performs
-setup only. Canonical modules do not run during `settle()` in 0.0.26.
+setup only. Canonical modules do not run during `settle()` in 0.0.26. A world with
+no each-window modules crosses the run in a single step instead of iterating
+empty communication windows.
+
+## Declaring the policy in model.yaml
+
+`model.yaml` may repeat the class's policy as `biosim.execution_policy`
+(`once_before_run`, `each_window` or `once_after_run`). The Python attribute stays
+the only thing that decides when BioWorld invokes the module; the manifest copy
+lets tools that can't import model code decide whether a Lab's time settings
+apply.
+
+The policy the code resolves to:
+
+- a class attribute resolves to that value;
+- an instance attribute set in `__init__` resolves to that value for the
+  constructed module's parameters;
+- an `execute()` module that sets nothing resolves to `each_window` and warns,
+  unless `model.yaml` declares `each_window`;
+- a module that overrides `advance_window()` always resolves to `each_window`.
+
+A declaration that disagrees with the constructed module is a load-time
+`PackageError` naming both values. `biosimulant labs validate` reads model source
+without importing it: it fails when the source provably disagrees, warns when the
+policy can't be verified (for example when `__init__` picks it from a parameter),
+and suggests the field for undeclared models whose source resolves. Leave the
+field out when the policy depends on parameters. A Lab can't override a model's
+policy.
 
 ## Opt-in convenience bases
 

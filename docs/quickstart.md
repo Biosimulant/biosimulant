@@ -88,7 +88,23 @@ class Predictor(biosim.BioModule):
 
 Use `ONCE_AFTER_RUN` for final analysis of simulation outputs. Use `EACH_WINDOW`
 when temporal or AI computation consumes evolving state; temporal code reads the
-window bounds from `context`. Manifests and Lab runtime fields do not change.
+window bounds from `context`.
+
+Repeat the policy in the model's `model.yaml` so Studio, Desktop and
+`biosimulant labs serve` can tell when it runs without importing its code:
+
+```yaml
+biosim:
+  entrypoint: "src.predictor:Predictor"
+  communication_step: 0.01
+  execution_policy: once_before_run
+```
+
+The class attribute still decides when the model runs; the runtime refuses to
+load a model whose declaration disagrees with it. When every module in a Lab
+declares a run-once policy, Run dialogs hide duration, communication step and
+settle steps. Lab `runtime.communication_step` stays required, and a run still
+needs a positive duration.
 
 ## Run the built-in examples
 

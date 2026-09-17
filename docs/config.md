@@ -20,6 +20,18 @@ report, export, or analysis modules; BioWorld drains those automatically.
 `settle_steps` remains available for legacy temporal modules that deliberately
 need zero-time propagation after the requested simulation duration.
 
+When every model in a Lab declares `biosim.execution_policy` as `once_before_run`
+or `once_after_run`, the Lab is *finite*: duration, communication step and settle
+steps don't affect results, so Run dialogs hide them. The runtime block still
+requires `communication_step`, and the run still needs a positive `duration`.
+
+Run input files passed to `biosimulant labs run --run-input-file` may place runtime
+overrides at `simulation_config.<key>` or `simulation_config.runtime.<key>` (the
+nested form wins), initial inputs at `parameters.initial_inputs`,
+`simulation_config.initial_inputs` or `simulation_config.runtime.initial_inputs`,
+and model parameters at `parameters.per_model.<alias>` or `parameters.<alias>`.
+Parameter overrides merge onto the Lab's parameters.
+
 ## Module declarations
 
 Each module is either:

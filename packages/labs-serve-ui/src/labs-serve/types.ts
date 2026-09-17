@@ -77,6 +77,14 @@ export type LabRuntime = {
   [key: string]: unknown;
 };
 
+export type ExecutionPolicy = "once_before_run" | "each_window" | "once_after_run";
+
+export type LabExecution = {
+  timing: "finite" | "temporal" | "unknown";
+  policies: Record<string, ExecutionPolicy | null>;
+  undeclared: string[];
+};
+
 export type ComputeWarning = {
   code: string;
   message: string;
@@ -94,6 +102,7 @@ export type LocalLab = {
   runtime_metadata_status?: "pending" | "running" | "ready" | "failed";
   runtime_metadata_error?: string | null;
   compute_warnings?: ComputeWarning[];
+  execution?: LabExecution;
   manifest: {
     title?: string;
     description?: string;

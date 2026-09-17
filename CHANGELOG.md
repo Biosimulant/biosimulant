@@ -7,6 +7,40 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.33] - 2026-09-17
+
+### Added
+
+- Accept an optional `biosim.execution_policy` in `model.yaml` that repeats the
+  module's execution policy for tools that can't import model code. The Python
+  attribute still decides when BioWorld invokes the module; loading a model whose
+  declaration disagrees with the constructed module raises `PackageError`.
+- Add `biosim.execution` with lab execution profiles (`finite`, `temporal`,
+  `unknown`), static execution-phase wiring rules, and a source reader that
+  resolves a model's policy without importing it.
+- Report execution timing from `labs validate`, which now fails on declarations
+  the source contradicts and on backward phase wiring between declared modules,
+  and warns on unverifiable or missing declarations.
+- Include the lab execution profile in `labs serve` `/api/lab` and resolved
+  per-module policies in `labs run` results.
+
+### Changed
+
+- Hide duration, communication step and settle steps in the `labs serve` Run
+  dialog for finite Labs, name the modules time settings apply to in mixed Labs,
+  and send only runtime values the user changed.
+- Cross runs in a single step when no module runs each window instead of
+  iterating empty communication windows.
+- Generate starter models that declare `execution_policy: each_window` in
+  `model.yaml`.
+
+### Fixed
+
+- Apply Studio- and Desktop-shaped run input files: runtime overrides under
+  `simulation_config.runtime`, initial inputs under `simulation_config`, and
+  alias-keyed parameter overrides were previously ignored. Per-model parameter
+  overrides now merge onto the Lab's parameters.
+
 ## [0.0.32] - 2026-09-17
 
 ### Changed

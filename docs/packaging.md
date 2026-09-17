@@ -228,6 +228,8 @@ biosimulant labs package path/to/lab --package biosimulant/example-lab --version
 - checksums match
 - `package.yaml` points to a real manifest
 - model manifests contain `biosim.entrypoint`
+- `biosim.execution_policy`, when declared, is `once_before_run`, `each_window` or `once_after_run` and agrees with the model source; unverifiable declarations and undeclared models whose source resolves produce warnings
+- wiring between declared modules only moves forward through execution phases, with no cycles among run-once modules
 - lab manifests contain valid `models`, `wiring`, and `runtime`
 - model dependencies use exact `==` pins only
 - package-backed child Labs use exact `package` + `version` values and have a matching `biosimulant.lock` entry with an artifact SHA-256
@@ -235,7 +237,7 @@ biosimulant labs package path/to/lab --package biosimulant/example-lab --version
 - every embedded model or path-based child Lab manifest is valid
 
 The command is meant to be operator-friendly:
-- success prints a concise summary with package name, version, and type
+- success prints a concise summary with package name, version, type and execution timing (`finite`, `temporal` or `unknown`)
 - failure prints a concise error list and exits non-zero
 
 ## Intentional Runtime Differences

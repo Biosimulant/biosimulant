@@ -19,6 +19,16 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
+from .execution import (
+    bind_manifest_execution_policy,
+    declared_execution_policy,
+    describe_lab_execution,
+    execution_phase_findings,
+    module_edges_from_wiring,
+    read_model_dir_execution_policy,
+    source_declaration_findings,
+    unknown_lab_execution,
+)
 from .modules import BioModule
 from .runtime import (
     LabTree,
@@ -814,6 +824,10 @@ def validate_lab_source(path: str | Path) -> PackageValidationResult:
             parsed_manifest=manifest,
             visited=set(),
         )
+        execution = inspect_lab_execution(source_path)
+        if execution["errors"]:
+            raise PackageError("; ".join(execution["errors"]))
+        result.warnings.extend(execution["warnings"])
         package_name, version = _validate_lab_release_identity(
             manifest,
             package_name_override=None,
@@ -831,6 +845,7 @@ def validate_lab_source(path: str | Path) -> PackageValidationResult:
             "description": manifest.get("description"),
             "entry_manifest": manifest_path.name,
             "source_format": "source-tree",
+            "execution": execution["profile"],
         }
         return result
     except Exception as exc:
@@ -979,6 +994,89 @@ def _remote_execution_init_kwargs(manifest: Mapping[str, Any]) -> dict[str, Any]
     return {str(key): expand(value) for key, value in raw.items()}
 
 
+def _bind_execution_policy(module: BioModule, manifest: Mapping[str, Any]) -> None:
+    try:
+        bind_manifest_execution_policy(module, manifest)
+    except ValueError as exc:
+        raise PackageError(f"model.yaml doesn't match the Python module: {exc}") from exc
+
+
+def inspect_lab_execution(path: str | Path) -> dict[str, Any]:
+    """Describe when a local lab's modules run without importing model code.
+
+    Returns ``{"profile", "errors", "warnings", "models"}``. ``profile`` follows
+    :class:`biosim.execution.LabExecutionProfile`. Errors cover a declaration the
+    source provably contradicts and invalid phase wiring between declared
+    modules; warnings cover declarations the source can't confirm and models
+    whose source shows a policy that model.yaml doesn't declare yet.
+    """
+
+    lab_dir = Path(path).expanduser().resolve()
+    manifest = _load_lab_manifest_from_dir(lab_dir)
+    errors: list[str] = []
+    warnings: list[str] = []
+    policies: dict[str, Any] = {}
+    models_report: dict[str, dict[str, Any]] = {}
+
+    if _package_children(manifest):
+        # Package-backed children resolve through the Hub; describe only what is
+        # local and leave each package child undeclared.
+        model_entries: list[dict[str, Any]] = []
+        for entry in manifest.get("models") or []:
+            if not isinstance(entry, Mapping):
+                continue
+            alias, embedded_path = entry.get("alias"), entry.get("path")
+            if isinstance(alias, str) and isinstance(embedded_path, str):
+                model_entries.append(
+                    {
+                        "alias": alias,
+                        "model_dir": str(_resolve_embedded_dir(lab_dir, lab_dir, embedded_path)),
+                    }
+                )
+        wiring = manifest.get("wiring") if isinstance(manifest.get("wiring"), list) else []
+        for child in manifest.get("children") or []:
+            if isinstance(child, Mapping) and isinstance(child.get("alias"), str):
+                policies[child["alias"]] = None
+    else:
+        model_entries, wiring, _parsed = _flatten_embedded_lab_dir(
+            payload_root=lab_dir,
+            current_lab_dir=lab_dir,
+        )
+
+    for entry in model_entries:
+        alias = str(entry["alias"])
+        model_dir = Path(str(entry["model_dir"]))
+        model_manifest = _load_model_manifest_from_dir(model_dir)
+        declared = declared_execution_policy(model_manifest)
+        reading = read_model_dir_execution_policy(model_dir, model_manifest)
+        model_errors, model_warnings = source_declaration_findings(declared, reading)
+        errors.extend(f"{alias}: {message}" for message in model_errors)
+        warnings.extend(f"{alias}: {message}" for message in model_warnings)
+        if declared is None and reading.status == "resolved" and reading.policy is not None:
+            warnings.append(
+                f"{alias}: add `execution_policy: {reading.policy.value}` under biosim in model.yaml "
+                "so tools can tell when this model runs"
+            )
+        policies[alias] = declared
+        models_report[alias] = {
+            "declared": declared.value if declared is not None else None,
+            "source": {
+                "status": reading.status,
+                "policy": reading.policy.value if reading.policy is not None else None,
+                "detail": reading.detail,
+            },
+        }
+
+    errors.extend(execution_phase_findings(policies, module_edges_from_wiring(wiring)))
+    profile = describe_lab_execution(policies) if policies else unknown_lab_execution()
+    return {
+        "profile": profile.to_dict(),
+        "errors": errors,
+        "warnings": warnings,
+        "models": models_report,
+    }
+
+
 def _instantiate_model_from_package(
     loaded: _LoadedPackage, parameters: Mapping[str, Any] | None = None
 ) -> tuple[BioModule, dict[str, Any]]:
@@ -1008,6 +1106,7 @@ def _instantiate_model_from_package(
         sys.path[:] = original_sys_path
     if not isinstance(module, BioModule):
         raise PackageError(f"Entrypoint {entrypoint} did not construct a BioModule")
+    _bind_execution_policy(module, manifest)
     from .compatibility import bind_manifest_ports, manifest_has_compatibility_declarations
 
     if manifest_has_compatibility_declarations(manifest):
@@ -1173,6 +1272,7 @@ def _instantiate_model_from_dir(
         sys.path[:] = original_sys_path
     if not isinstance(module, BioModule):
         raise PackageError(f"Entrypoint {entrypoint} did not construct a BioModule")
+    _bind_execution_policy(module, manifest)
     return module, {
         "communication_step": bsim_block.get("communication_step"),
         "setup": (
@@ -1685,6 +1785,7 @@ def _run_lab_loaded_package(
         "duration": duration,
         "communication_step": prepared.communication_step,
         "settle_steps": settle_steps,
+        "execution": describe_lab_execution(world.execution_policies).to_dict(),
         "modules": prepared.modules,
         "outputs": outputs,
         "visuals": world.collect_visuals(),
@@ -1973,6 +2074,10 @@ def _validate_model_manifest(manifest: Mapping[str, Any]) -> None:
     entrypoint = bsim.get("entrypoint")
     if not isinstance(entrypoint, str) or not entrypoint.strip():
         raise PackageError("Model manifest must contain biosim.entrypoint")
+    try:
+        declared_execution_policy(manifest)
+    except ValueError as exc:
+        raise PackageError(str(exc)) from exc
     from .compatibility import validate_manifest
 
     findings = validate_manifest(manifest)
@@ -2138,6 +2243,7 @@ __all__ = [
     "build_package",
     "export_lab_package",
     "fetch_package",
+    "inspect_lab_execution",
     "prepare_lab_package",
     "publish_package",
     "run_package",

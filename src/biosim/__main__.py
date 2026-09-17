@@ -37,7 +37,7 @@ import shutil
 import shlex
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1663,6 +1663,18 @@ def _print_lab_init_success(payload: dict[str, Any], *, json_output: bool) -> No
         print(f"Starter model: {payload['starter_model']}")
 
 
+def _execution_timing_summary(execution: Mapping[str, Any]) -> str:
+    timing = execution.get("timing")
+    if timing == "finite":
+        return "finite (every module runs once; duration and communication step don't apply)"
+    if timing == "temporal":
+        return "temporal (duration and communication step apply)"
+    undeclared = execution.get("undeclared") or []
+    if undeclared:
+        return f"unknown (execution_policy not declared for: {', '.join(str(item) for item in undeclared)})"
+    return "unknown"
+
+
 def _print_lab_validation_success(package_file: Path, result: Any, *, json_output: bool) -> None:
     payload = {
         "command": "labs.validate",
@@ -1680,6 +1692,9 @@ def _print_lab_validation_success(package_file: Path, result: Any, *, json_outpu
     print(f"Lab: {package_file}")
     if result.metadata:
         print(f"Package: {result.metadata.get('package')}@{result.metadata.get('version')}")
+        execution = result.metadata.get("execution")
+        if isinstance(execution, dict) and execution.get("timing"):
+            print(f"Execution: {_execution_timing_summary(execution)}")
     for warning in result.warnings:
         print(f"Warning: {warning}")
 
