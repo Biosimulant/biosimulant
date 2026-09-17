@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -244,19 +245,29 @@ def test_uv_command_rejects_bad_configured_path(
         managed_runtime._uv_command()
 
 
+class _FakeChildProcess:
+    def __init__(self, *, returncode: int, stdout: str, stderr: str) -> None:
+        self.returncode = returncode
+        self.stdout = io.StringIO(stdout)
+        self.stderr = io.StringIO(stderr)
+
+    def wait(self) -> int:
+        return self.returncode
+
+
 def test_run_child_package_parses_json_result(monkeypatch: pytest.MonkeyPatch) -> None:
     observed = {}
 
-    def fake_run(args, **kwargs):
+    def fake_popen(args, **kwargs):
         observed["args"] = args
         observed["env"] = kwargs["env"]
-        return SimpleNamespace(
+        return _FakeChildProcess(
             returncode=0,
             stdout='model log\n{"outputs": ["state"]}\n',
             stderr="",
         )
 
-    monkeypatch.setattr(managed_runtime.subprocess, "run", fake_run)
+    monkeypatch.setattr(managed_runtime.subprocess, "Popen", fake_popen)
 
     result = managed_runtime.run_child_package(
         Path("/runtime/python"),
@@ -267,13 +278,48 @@ def test_run_child_package_parses_json_result(monkeypatch: pytest.MonkeyPatch) -
     assert result == {"outputs": ["state"]}
     assert observed["args"][-2:] == ["lab.bsilab", "1"]
     assert observed["env"][managed_runtime.BIOSIM_MANAGED_RUNTIME_CHILD_ENV] == "1"
+    assert observed["env"]["PYTHONUNBUFFERED"] == "1"
+
+
+def test_run_child_package_relays_child_output_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        managed_runtime.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: _FakeChildProcess(
+            returncode=0,
+            stdout=(
+                'BSIM_PROGRESS:{"phase": "runtime", "message": "Preparing"}\n'
+                "model log\n"
+                '{"outputs": ["state"]}\n'
+            ),
+            stderr="Downloading weights\n",
+        ),
+    )
+
+    result = managed_runtime.run_child_package(
+        Path("/runtime/python"),
+        Path("lab.bsilab"),
+        install_deps=False,
+    )
+
+    captured = capsys.readouterr()
+    assert result == {"outputs": ["state"]}
+    assert captured.out == ""
+    relayed = captured.err.splitlines()
+    assert 'BSIM_PROGRESS:{"phase": "runtime", "message": "Preparing"}' in relayed
+    assert "model log" in relayed
+    assert "Downloading weights" in relayed
+    assert '{"outputs": ["state"]}' not in relayed
 
 
 def test_run_child_package_reports_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         managed_runtime.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(
+        "Popen",
+        lambda *_args, **_kwargs: _FakeChildProcess(
             returncode=1,
             stdout="",
             stderr="boom",

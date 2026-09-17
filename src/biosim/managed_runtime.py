@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -154,6 +155,8 @@ def run_child_package(
     )
     env = dict(os.environ)
     env[BIOSIM_MANAGED_RUNTIME_CHILD_ENV] = "1"
+    # Line-buffer the child so its progress reaches the parent while it runs.
+    env["PYTHONUNBUFFERED"] = "1"
     command = [
         str(python_path),
         "-c",
@@ -163,20 +166,78 @@ def run_child_package(
     ]
     if dependency_root is not None:
         command.append(str(dependency_root))
-    completed = subprocess.run(
+    process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        bufsize=1,
         env=env,
     )
-    if completed.returncode != 0:
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    relay_lock = threading.Lock()
+    readers = [
+        threading.Thread(
+            target=_relay_child_stream,
+            args=(process.stdout, stdout_lines, relay_lock),
+            kwargs={"skip_json_result": True},
+            daemon=True,
+        ),
+        threading.Thread(
+            target=_relay_child_stream,
+            args=(process.stderr, stderr_lines, relay_lock),
+            daemon=True,
+        ),
+    ]
+    for reader in readers:
+        reader.start()
+    returncode = process.wait()
+    for reader in readers:
+        reader.join()
+    stdout = "".join(stdout_lines)
+    stderr = "".join(stderr_lines)
+    if returncode != 0:
         raise PackageError(
             "Managed Python runtime failed to run the package.\n"
-            f"stdout:\n{_tail(completed.stdout)}\n"
-            f"stderr:\n{_tail(completed.stderr)}"
+            f"stdout:\n{_tail(stdout)}\n"
+            f"stderr:\n{_tail(stderr)}"
         )
-    return _parse_json_result(completed.stdout)
+    return _parse_json_result(stdout)
+
+
+def _relay_child_stream(
+    stream: Any,
+    lines: list[str],
+    lock: threading.Lock,
+    *,
+    skip_json_result: bool = False,
+) -> None:
+    """Collect a child stream and relay each line to stderr as it arrives.
+
+    The parent's stdout is reserved for its own result (for example ``--json``),
+    so child output goes to stderr. The child's final JSON result line is kept
+    but not relayed.
+    """
+    if stream is None:
+        return
+    for line in stream:
+        lines.append(line)
+        if skip_json_result and _is_json_object_line(line):
+            continue
+        with lock:
+            sys.stderr.write(line if line.endswith("\n") else f"{line}\n")
+            sys.stderr.flush()
+
+
+def _is_json_object_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        return isinstance(json.loads(stripped), dict)
+    except json.JSONDecodeError:
+        return False
 
 
 def _runtime_cache_root() -> Path:
