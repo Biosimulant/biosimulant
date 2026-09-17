@@ -53,6 +53,7 @@ name = "biosimulant"
 source = { editable = "." }
 dependencies = [
     { name = "argcomplete" },
+    { name = "biosimulant-model-compatibility-standard" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -96,6 +97,7 @@ ml = [
 [package.metadata]
 requires-dist = [
     { name = "argcomplete", specifier = ">=3.5" },
+    { name = "biosimulant-model-compatibility-standard", specifier = "==0.1.0" },
     { name = "fastapi", specifier = ">=0.110,<1" },
     { name = "httpx", specifier = ">=0.26,<1" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.26" },
@@ -118,6 +120,18 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.23" },
 ]
 provides-extras = ["all", "cellml", "dev", "ml"]
+
+[[package]]
+name = "biosimulant-model-compatibility-standard"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/d6/d73d20d0a5b24f46eed9c527ad46e742356880556105815d9286bf64bc2d/biosimulant_model_compatibility_standard-0.1.0.tar.gz", hash = "sha256:5b611109eff8dc8d20a84c79584b1b36e4a95ccbd8fdd43b2e199aed374f39b5", size = 10203, upload-time = "2026-09-17T03:39:55.553Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/de/c15e5778f64128a3e5a67ad3bb7cb74491b1fa2c300220e6400a6bdf5f70/biosimulant_model_compatibility_standard-0.1.0-py3-none-any.whl", hash = "sha256:e0d7a4896d7bebabf22a73f93f6804a3f4b6f5b6f96a5ef7292d1aa5185d9dc8", size = 12135, upload-time = "2026-09-17T03:39:54.516Z" },
+]
 
 [[package]]
 name = "certifi"
