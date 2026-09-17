@@ -336,11 +336,37 @@ def check_compatibility(source: SignalSpec, target: SignalSpec, *, sample: Any =
     if source_contract is None and target_contract is None:
         return CompatibilityResult(tuple(issues))
     if source_contract is None or target_contract is None:
+        declared_contract = (
+            source_contract if source_contract is not None else target_contract
+        )
+        validation = validate_contract(declared_contract)
+        issues.extend(validation.issues)
+        if validation.status == "blocked":
+            return CompatibilityResult(tuple(issues))
+
+        missing_side = "source" if source_contract is None else "target"
+        if missing_side == "source":
+            message = (
+                "Connection allowed using structural checks. The source does not declare a "
+                "compatibility profile. The target profile can validate the value, but not "
+                "the source's intended scientific meaning."
+            )
+        else:
+            message = (
+                "Connection allowed using structural checks. The target does not declare a "
+                "compatibility profile, so scientific compatibility was not verified."
+            )
         issues.append(
             _issue(
-                "blocked",
-                "STANDARD_REQUIRED",
-                "Both connected ports must declare the same compatibility profile, or neither may declare one.",
+                "warning",
+                "PROFILE_PARTIAL",
+                message,
+            )
+        )
+        issues.extend(
+            _run_checker(
+                get_profile(str(declared_contract["profile"])),
+                sample,
             )
         )
         return CompatibilityResult(tuple(issues))
@@ -378,12 +404,18 @@ def check_payload(contract: Mapping[str, Any] | None, value: Any) -> Compatibili
     )
 
 
-def enforce_result(result: CompatibilityResult, *, context: str) -> None:
+def enforce_result(
+    result: CompatibilityResult,
+    *,
+    context: str,
+    suppressed_warning_codes: tuple[str, ...] = (),
+) -> None:
     blocked = [issue.message for issue in result.issues if issue.level == "blocked"]
     if blocked:
         raise ValueError(f"{context}: " + "; ".join(blocked))
     for issue in result.issues:
-        logger.warning("%s: %s", context, issue.message)
+        if issue.code not in suppressed_warning_codes:
+            logger.warning("%s: %s", context, issue.message)
 
 
 def _finding(path: str, issue: CompatibilityIssue) -> dict[str, Any]:

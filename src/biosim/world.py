@@ -454,6 +454,7 @@ class BioWorld:
                 target_spec,
                 sample=source_signal.value,
                 check_sample=True,
+                suppressed_warning_codes=("PROFILE_PARTIAL",),
             )
             self._warn_if_input_stale(conn, source_signal, target_spec, start)
             if source_signal.kind == "event":

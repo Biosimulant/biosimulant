@@ -7,6 +7,16 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.30] - 2026-09-17
+
+### Changed
+
+- Allow structurally valid connections when only one port declares a
+  compatibility profile, reporting `PROFILE_PARTIAL` instead of blocking the
+  wire. Live values are still checked against whichever profile is declared.
+- Report a partial-profile warning once when a connection is created instead
+  of repeating it at every communication boundary.
+
 ## [0.0.28] - 2026-09-13
 
 ### Added

@@ -90,13 +90,44 @@ def test_connection_rules_are_exact_and_context_is_not_guessed() -> None:
     smiles = SignalSpec.scalar(dtype="str", format="sequence", contract=SMILES)
 
     assert check_compatibility(plain, plain).status == "ok"
-    assert check_compatibility(plain, sequence).issues[-1].code == "STANDARD_REQUIRED"
-    assert check_compatibility(sequence, plain).issues[-1].code == "STANDARD_REQUIRED"
+    plain_to_profiled = check_compatibility(plain, sequence)
+    assert plain_to_profiled.status == "warning"
+    assert plain_to_profiled.compatible is True
+    assert plain_to_profiled.issues[-1].code == "PROFILE_PARTIAL"
+    assert "source does not declare" in plain_to_profiled.issues[-1].message
+
+    profiled_to_plain = check_compatibility(sequence, plain)
+    assert profiled_to_plain.status == "warning"
+    assert profiled_to_plain.compatible is True
+    assert profiled_to_plain.issues[-1].code == "PROFILE_PARTIAL"
+    assert "target does not declare" in profiled_to_plain.issues[-1].message
     assert check_compatibility(sequence, smiles).issues[-1].code == "PROFILE_MISMATCH"
     assert check_compatibility(human, any_species).status == "ok"
     assert check_compatibility(sequence, human).issues[-1].code == "CONTEXT_MISSING"
     assert check_compatibility(any_species, human).issues[-1].code == "CONTEXT_MISSING"
     assert check_compatibility(mouse, human).issues[-1].code == "CONTEXT_MISMATCH"
+
+
+def test_one_sided_profiles_validate_declared_contracts_and_sample_values(
+    monkeypatch,
+) -> None:
+    plain = SignalSpec.scalar(dtype="str", format="sequence")
+    sequence = SignalSpec.scalar(dtype="str", format="sequence", contract=SEQUENCE)
+    missing = SignalSpec.scalar(
+        dtype="str",
+        format="sequence",
+        contract={"profile": "missing/v1"},
+    )
+
+    assert check_compatibility(plain, sequence, sample="ACDE").status == "warning"
+    assert check_compatibility(sequence, plain, sample="ACDE").status == "warning"
+    assert check_compatibility(plain, sequence, sample="ACD1").status == "blocked"
+    assert check_compatibility(sequence, plain, sample="ACD1").status == "blocked"
+    assert check_compatibility(missing, plain).issues[-1].code == "PROFILE_UNKNOWN"
+    assert check_compatibility(plain, missing).issues[-1].code == "PROFILE_UNKNOWN"
+
+    monkeypatch.delitem(compatibility_module._CHECKERS, "protein_sequence")
+    assert check_compatibility(sequence, plain).issues[-1].code == "CHECKER_UNAVAILABLE"
 
 
 def test_structural_mismatch_blocks_before_profile_comparison() -> None:
@@ -252,6 +283,22 @@ def test_cli_reports_standard_profiles_validation_and_comparison(tmp_path: Path,
     ])
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
 
+    unprofiled_consumer = tmp_path / "unprofiled-consumer.yaml"
+    unprofiled_consumer.write_text(
+        yaml.safe_dump(_manifest(direction="inputs", contract=None)),
+        encoding="utf-8",
+    )
+    main([
+        "compatibility",
+        "compare",
+        f"{producer}#outputs.sequence",
+        f"{unprofiled_consumer}#inputs.sequence",
+    ])
+    partial = json.loads(capsys.readouterr().out)
+    assert partial["status"] == "warning"
+    assert partial["compatible"] is True
+    assert partial["issues"][0]["code"] == "PROFILE_PARTIAL"
+
 
 def test_yaml_loader_and_enforcement_errors_are_explicit(tmp_path: Path) -> None:
     broken = tmp_path / "broken.yaml"
@@ -275,11 +322,47 @@ class _BadSequenceProducer(BioModule):
         return {"sequence": "ACD1"}
 
 
+class _ProfiledSequenceProducer(BioModule):
+    execution_policy = "each_window"
+
+    def outputs(self):
+        return {
+            "sequence": SignalSpec.scalar(
+                dtype="str",
+                format="sequence",
+                contract=SEQUENCE,
+            )
+        }
+
+    def execute(self, inputs, *, context: ExecutionContext):
+        return {"sequence": "ACDE"}
+
+
+class _PlainBadSequenceProducer(BioModule):
+    execution_policy = "each_window"
+
+    def outputs(self):
+        return {"sequence": SignalSpec.scalar(dtype="str", format="sequence")}
+
+    def execute(self, inputs, *, context: ExecutionContext):
+        return {"sequence": "ACD1"}
+
+
 class _SequenceConsumer(BioModule):
     execution_policy = "each_window"
 
     def inputs(self):
         return {"sequence": SignalSpec.scalar(dtype="str", format="sequence", contract=SEQUENCE)}
+
+    def execute(self, inputs, *, context: ExecutionContext):
+        return {}
+
+
+class _PlainSequenceConsumer(BioModule):
+    execution_policy = "each_window"
+
+    def inputs(self):
+        return {"sequence": SignalSpec.scalar(dtype="str", format="sequence")}
 
     def execute(self, inputs, *, context: ExecutionContext):
         return {}
@@ -292,6 +375,35 @@ def test_world_rechecks_actual_values_on_internal_wires() -> None:
     world.connect("producer.sequence", "consumer.sequence")
     with pytest.raises(ValueError, match="unsupported character"):
         world.run(2.0)
+
+    one_sided = BioWorld(communication_step=1.0)
+    one_sided.add_biomodule("producer", _BadSequenceProducer())
+    one_sided.add_biomodule("consumer", _PlainSequenceConsumer())
+    one_sided.connect("producer.sequence", "consumer.sequence")
+    with pytest.raises(ValueError, match="unsupported character"):
+        one_sided.run(2.0)
+
+    unprofiled_source = BioWorld(communication_step=1.0)
+    unprofiled_source.add_biomodule("producer", _PlainBadSequenceProducer())
+    unprofiled_source.add_biomodule("consumer", _SequenceConsumer())
+    unprofiled_source.connect("producer.sequence", "consumer.sequence")
+    with pytest.raises(ValueError, match="unsupported character"):
+        unprofiled_source.run(2.0)
+
+
+def test_world_logs_partial_profile_warning_once(caplog) -> None:
+    world = BioWorld(communication_step=1.0)
+    world.add_biomodule("producer", _ProfiledSequenceProducer())
+    world.add_biomodule("consumer", _PlainSequenceConsumer())
+    world.connect("producer.sequence", "consumer.sequence")
+    world.run(3.0)
+
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "target does not declare a compatibility profile" in record.getMessage()
+    ]
+    assert len(messages) == 1
 
 
 def test_result_objects_checker_edges_and_warning_logging(monkeypatch, caplog) -> None:
@@ -306,6 +418,20 @@ def test_result_objects_checker_edges_and_warning_logging(monkeypatch, caplog) -
     assert result.to_dict()["issues"] == [warning.to_dict()]
     enforce_result(result, context="example")
     assert "Review this" in caplog.text
+    caplog.clear()
+    enforce_result(
+        result,
+        context="different warning",
+        suppressed_warning_codes=("PROFILE_PARTIAL",),
+    )
+    assert "Review this" in caplog.text
+    caplog.clear()
+    enforce_result(
+        result,
+        context="quiet example",
+        suppressed_warning_codes=("REVIEW",),
+    )
+    assert "Review this" not in caplog.text
 
     monkeypatch.setitem(
         compatibility_module._CHECKERS,

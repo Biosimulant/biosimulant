@@ -698,6 +698,7 @@ def validate_connection_specs(
     *,
     sample: Any = None,
     check_sample: bool = False,
+    suppressed_warning_codes: tuple[str, ...] = (),
 ) -> None:
     """Validate that one declared output port can feed one input port."""
     from .compatibility import check_compatibility, enforce_result
@@ -707,6 +708,7 @@ def validate_connection_specs(
         if check_sample
         else check_compatibility(source, target),
         context="incompatible ports",
+        suppressed_warning_codes=suppressed_warning_codes,
     )
 
 
