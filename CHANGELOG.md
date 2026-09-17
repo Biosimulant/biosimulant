@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.34] - 2026-09-17
+
 ### Added
 
 - Record per-connection compatibility evidence. `labs run` results now carry a
