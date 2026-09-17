@@ -1676,3 +1676,84 @@ def test_lab_python_version_runtime_check_reports_interpreter_mismatch(
 def test_validate_lab_manifest_error_matrix(manifest, match: str) -> None:
     with pytest.raises(PackageError, match=match):
         pack_module._validate_lab_manifest(manifest)
+
+
+def test_remote_execution_init_kwargs_override_parameters_only_on_remote_compute(
+    tmp_path: Path, monkeypatch
+) -> None:
+    model_dir = _write_counter_model(tmp_path / "counter")
+    manifest_path = model_dir / "model.yaml"
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8")
+        + "runtime:\n"
+        + "  remote:\n"
+        + "    init_kwargs:\n"
+        + "      step: 5.0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv(pack_module.BIOSIM_REMOTE_EXECUTION_ENV, raising=False)
+
+    local_module, _ = pack_module._instantiate_model_from_dir(
+        model_dir, parameters={"step": 2.0}
+    )
+    monkeypatch.setenv(pack_module.BIOSIM_REMOTE_EXECUTION_ENV, "1")
+    remote_module, _ = pack_module._instantiate_model_from_dir(
+        model_dir, parameters={"step": 2.0}
+    )
+
+    assert local_module.step == 2.0
+    assert remote_module.step == 5.0
+
+
+def test_remote_execution_init_kwargs_expand_the_mount_root(monkeypatch) -> None:
+    manifest = {
+        "runtime": {
+            "remote": {
+                "init_kwargs": {
+                    "runtime_mode": "external",
+                    "cache_dir": "${REMOTE_EXECUTION_MOUNT_ROOT}/runtime-cache/boltz",
+                    "paths": ["${REMOTE_EXECUTION_MOUNT_ROOT}/a", "b"],
+                }
+            }
+        }
+    }
+    monkeypatch.setenv(pack_module.BIOSIM_REMOTE_EXECUTION_ENV, "1")
+    monkeypatch.delenv(pack_module.BIOSIM_REMOTE_EXECUTION_MOUNT_ROOT_ENV, raising=False)
+
+    with pytest.raises(PackageError, match="BIOSIM_REMOTE_EXECUTION_MOUNT_ROOT"):
+        pack_module._remote_execution_init_kwargs(manifest)
+
+    monkeypatch.setenv(pack_module.BIOSIM_REMOTE_EXECUTION_MOUNT_ROOT_ENV, "/workspace/.bsimcache/")
+    assert pack_module._remote_execution_init_kwargs(manifest) == {
+        "runtime_mode": "external",
+        "cache_dir": "/workspace/.bsimcache/runtime-cache/boltz",
+        "paths": ["/workspace/.bsimcache/a", "b"],
+    }
+    assert pack_module._remote_execution_init_kwargs({"runtime": {"remote": {}}}) == {}
+
+
+def test_install_declared_dependencies_exposes_installed_console_scripts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    scripts_dir = str(tmp_path / "venv" / "bin")
+    monkeypatch.setattr(
+        pack_module.sysconfig,
+        "get_path",
+        lambda name: scripts_dir if name == "scripts" else None,
+    )
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setattr(pack_module, "_uv_module_available", lambda: False)
+    monkeypatch.setattr(
+        pack_module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    manifest = {"runtime": {"dependencies": {"packages": ["boltz==2.0.2"]}}}
+
+    pack_module._install_declared_dependencies(manifest)
+    pack_module._install_declared_dependencies(manifest)
+
+    assert pack_module.os.environ["PATH"].split(pack_module.os.pathsep) == [
+        scripts_dir,
+        "/usr/bin",
+    ]

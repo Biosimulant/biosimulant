@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 from contextlib import nullcontext
 from collections import deque
@@ -937,6 +938,47 @@ def _module_paths_for_payload(payload_root: Path) -> list[str]:
     return [str(payload_root)]
 
 
+BIOSIM_REMOTE_EXECUTION_ENV = "BIOSIM_REMOTE_EXECUTION"
+BIOSIM_REMOTE_EXECUTION_MOUNT_ROOT_ENV = "BIOSIM_REMOTE_EXECUTION_MOUNT_ROOT"
+_REMOTE_EXECUTION_MOUNT_ROOT_TOKEN = "${REMOTE_EXECUTION_MOUNT_ROOT}"
+
+
+def _remote_execution_init_kwargs(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Return ``runtime.remote.init_kwargs`` when running on Biosimulant remote compute.
+
+    Remote compute sets ``BIOSIM_REMOTE_EXECUTION=1``. The manifest's remote init
+    kwargs then override lab parameters, as the hosted executor does, so a model
+    can use its installed runtime dependencies and a cache under
+    ``${REMOTE_EXECUTION_MOUNT_ROOT}`` instead of provisioning its own copies.
+    """
+    if os.environ.get(BIOSIM_REMOTE_EXECUTION_ENV) != "1":
+        return {}
+    runtime = manifest.get("runtime")
+    remote = runtime.get("remote") if isinstance(runtime, Mapping) else None
+    raw = remote.get("init_kwargs") if isinstance(remote, Mapping) else None
+    if not isinstance(raw, Mapping):
+        return {}
+    mount_root = os.environ.get(BIOSIM_REMOTE_EXECUTION_MOUNT_ROOT_ENV, "").rstrip("/")
+
+    def expand(value: Any) -> Any:
+        if isinstance(value, str):
+            if _REMOTE_EXECUTION_MOUNT_ROOT_TOKEN not in value:
+                return value
+            if not mount_root:
+                raise PackageError(
+                    f"{BIOSIM_REMOTE_EXECUTION_MOUNT_ROOT_ENV} must be set to expand "
+                    f"{_REMOTE_EXECUTION_MOUNT_ROOT_TOKEN} in runtime.remote.init_kwargs"
+                )
+            return value.replace(_REMOTE_EXECUTION_MOUNT_ROOT_TOKEN, mount_root)
+        if isinstance(value, list):
+            return [expand(item) for item in value]
+        if isinstance(value, Mapping):
+            return {key: expand(item) for key, item in value.items()}
+        return value
+
+    return {str(key): expand(value) for key, value in raw.items()}
+
+
 def _instantiate_model_from_package(
     loaded: _LoadedPackage, parameters: Mapping[str, Any] | None = None
 ) -> tuple[BioModule, dict[str, Any]]:
@@ -953,6 +995,7 @@ def _instantiate_model_from_package(
         init_kwargs.update(dict(bsim_block.get("init_kwargs") or {}))
     if parameters:
         init_kwargs.update(dict(parameters))
+    init_kwargs.update(_remote_execution_init_kwargs(manifest))
 
     original_sys_path = list(sys.path)
     try:
@@ -1117,6 +1160,7 @@ def _instantiate_model_from_dir(
         init_kwargs.update(dict(bsim_block.get("init_kwargs") or {}))
     if parameters:
         init_kwargs.update(dict(parameters))
+    init_kwargs.update(_remote_execution_init_kwargs(manifest))
 
     original_sys_path = list(sys.path)
     try:
@@ -1740,6 +1784,7 @@ def _install_declared_dependencies(
     ]
     if bad:
         raise PackageError(f"All dependencies must use exact pins: {bad}")
+    _ensure_interpreter_scripts_on_path()
     command = _dependency_install_command(packages)
     if cancel_checker is not None:
         cancel_checker()
@@ -1791,6 +1836,22 @@ def _install_declared_dependencies(
             f"Dependency installation failed with exit code {returncode}.\n"
             f"Recent pip output:\n{tail}"
         )
+
+
+def _ensure_interpreter_scripts_on_path() -> None:
+    """Expose console scripts from dependencies installed into this interpreter.
+
+    Dependencies are installed with ``--python sys.executable``; a model that
+    shells out to one of them (for example a ``boltz`` CLI) must find it on PATH
+    even when this interpreter's environment was never activated.
+    """
+    scripts_dir = sysconfig.get_path("scripts")
+    if not scripts_dir:
+        return
+    parts = [part for part in os.environ.get("PATH", "").split(os.pathsep) if part]
+    if scripts_dir in parts:
+        return
+    os.environ["PATH"] = os.pathsep.join([scripts_dir, *parts])
 
 
 def _dependency_install_command(packages: list[str]) -> list[str]:

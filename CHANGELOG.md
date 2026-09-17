@@ -7,6 +7,17 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.31] - 2026-09-17
+
+### Fixed
+
+- Apply each model's `runtime.remote.init_kwargs` when `BIOSIM_REMOTE_EXECUTION=1`,
+  expanding `${REMOTE_EXECUTION_MOUNT_ROOT}` from
+  `BIOSIM_REMOTE_EXECUTION_MOUNT_ROOT`, so hosted runs use installed runtime
+  dependencies and persistent caches as the hosted executor does.
+- Put the interpreter's scripts directory on `PATH` before installing declared
+  dependencies so models can invoke dependency console scripts such as `boltz`.
+
 ## [0.0.30] - 2026-09-17
 
 ### Changed
