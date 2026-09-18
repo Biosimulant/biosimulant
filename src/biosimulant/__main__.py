@@ -26,12 +26,21 @@ from biosim.__about__ import __version__
 from biosim.__main__ import main as _legacy_main
 from biosim.cloud import Client as CloudClient
 from biosim.cloud.errors import ApiError as CloudApiError
+from biosim.cloud.errors import AuthenticationError as CloudAuthenticationError
 from biosim.credentials import (
+    DEFAULT_REGISTRY,
+    DEFAULT_TOKEN_CONSOLE_URL,
     CredentialError,
     credential_status,
     delete_token,
     normalize_registry_origin,
+    resolve_token,
     store_token,
+    verify_token,
+)
+from biosim.web_login import (
+    DEFAULT_WEB_LOGIN_SCOPES,
+    browser_login,
 )
 from biosim.managed_runtime import (
     _current_python_minor,
@@ -66,8 +75,8 @@ GLOBAL_VALUES = {
 COMMANDS: tuple[tuple[str, str], ...] = (
     ("doctor", "Check the headless CLI and local runtime installation"),
     ("commands list", "List the canonical machine-readable command catalog"),
-    ("auth login", "Store credentials for one registry"),
-    ("auth status", "Inspect credentials for one registry"),
+    ("auth login", "Verify and store a registry token for one registry"),
+    ("auth status", "Inspect, and optionally verify, credentials for one registry"),
     ("auth logout", "Remove credentials for one registry"),
     ("labs init", "Create a local runnable lab"),
     ("labs create", "Create a managed local lab"),
@@ -95,6 +104,11 @@ COMMANDS: tuple[tuple[str, str], ...] = (
     ("labs release build", "Build a release manifest"),
     ("labs release publish", "Build and publish a release manifest"),
     ("labs release ci", "Validate, build, and publish a release manifest"),
+    ("compatibility standard", "Show the installed compatibility standard release"),
+    ("compatibility profiles", "List installed compatibility profiles"),
+    ("compatibility show", "Show one exact compatibility profile"),
+    ("compatibility validate", "Validate compatibility declarations in model.yaml"),
+    ("compatibility compare", "Compare one output port with one input port"),
     ("validate", "Alias for labs validate"),
     ("run", "Alias for labs run"),
     ("runtime status", "Inspect the managed runtime"),
@@ -115,6 +129,24 @@ COMMANDS: tuple[tuple[str, str], ...] = (
     ("jobs list", "List hosted jobs"),
     ("jobs get", "Inspect a hosted job"),
 )
+
+# Commands the catalog lists but this CLI cannot perform against the public API.
+# The reason is shared with the runtime failure so the two cannot drift apart.
+UNAVAILABLE_COMMANDS: dict[str, str] = {
+    "runs start": (
+        "A managed run starts when it is created; use `biosimulant runs create`."
+    ),
+    "runs upload": "Uploading run artifacts is not available in this CLI.",
+    "jobs list": (
+        "Background jobs are not exposed by the public API; "
+        "use `biosimulant runs list` for managed runs."
+    ),
+    "jobs get": (
+        "Background jobs are not exposed by the public API; "
+        "use `biosimulant runs get` for a managed run."
+    ),
+}
+
 
 _DEPRECATED_DESKTOP_COMMANDS = {
     "raw",
@@ -240,6 +272,11 @@ def main(argv: list[str] | None = None) -> None:
         failure = _failure_for_exception(exc)
         _emit_failure(failure, options, command)
         raise SystemExit(failure.exit_code) from exc
+    except KeyboardInterrupt as exc:
+        # Ctrl-C is a user decision, not a crash; never print a traceback for it.
+        failure = CliFailure("cancelled", "Cancelled.", exit_code=EXIT_OPERATION)
+        _emit_failure(failure, options, command)
+        raise SystemExit(130) from exc
 
 
 def _root_parser() -> argparse.ArgumentParser:
@@ -368,11 +405,59 @@ def _commands_list(argv: list[str]) -> dict[str, Any]:
     parser.parse_args(argv)
     return {
         "commands": [
-            {"path": path, "summary": summary, "public": True}
+            {
+                "path": path,
+                "summary": summary,
+                "public": True,
+                "available": path not in UNAVAILABLE_COMMANDS,
+                **(
+                    {"unavailableReason": UNAVAILABLE_COMMANDS[path]}
+                    if path in UNAVAILABLE_COMMANDS
+                    else {}
+                ),
+            }
             for path, summary in COMMANDS
         ],
         "globalOptions": sorted([*GLOBAL_FLAGS, *GLOBAL_VALUES]),
     }
+
+
+def _is_default_registry(origin: str) -> bool:
+    return origin == normalize_registry_origin(DEFAULT_REGISTRY)
+
+
+def _note(message: str) -> None:
+    """Write operator guidance to stderr so stdout stays machine-readable."""
+
+    print(message, file=sys.stderr)
+
+
+def _login_guidance(origin: str) -> None:
+    _note(f"Signing in to {origin}")
+    if _is_default_registry(origin):
+        _note("Paste a developer API key (it starts with `bsk_live_`).")
+        _note(f"Create one at {DEFAULT_TOKEN_CONSOLE_URL}")
+        _note("It needs the packages:read and packages:write scopes.")
+    else:
+        _note(f"Paste a token issued by {origin}.")
+    _note("")
+    _note(
+        "Sign-in is only needed for private labs and publishing. "
+        "Local runs and public pulls work without it."
+    )
+    _note("")
+
+
+def _prompt_for_token() -> str:
+    try:
+        return getpass.getpass("Token: ").strip()
+    except (KeyboardInterrupt, EOFError) as exc:
+        _note("")
+        raise CliFailure(
+            "cancelled",
+            "Sign-in cancelled; no credentials were stored.",
+            exit_code=EXIT_OPERATION,
+        ) from exc
 
 
 def _auth(argv: list[str]) -> dict[str, Any]:
@@ -381,28 +466,110 @@ def _auth(argv: list[str]) -> dict[str, Any]:
     login = subparsers.add_parser("login")
     login.add_argument("registry", nargs="?", default=None)
     login.add_argument("--token-stdin", action="store_true")
+    login.add_argument(
+        "--web",
+        action="store_true",
+        help="Sign in through the browser instead of pasting a token",
+    )
+    login.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Store the token without checking it against the registry",
+    )
     status = subparsers.add_parser("status")
     status.add_argument("registry", nargs="?", default=None)
+    status.add_argument(
+        "--verify",
+        action="store_true",
+        help="Resolve the stored credential to an account",
+    )
     logout = subparsers.add_parser("logout")
     logout.add_argument("registry", nargs="?", default=None)
     args = parser.parse_args(argv)
     if args.command == "status":
-        return credential_status(args.registry)
+        return credential_status(args.registry, verify=args.verify)
     if args.command == "logout":
         origin = normalize_registry_origin(args.registry)
         return {"registry": origin, "removed": delete_token(origin)}
-    if args.token_stdin:
+
+    origin = normalize_registry_origin(args.registry)
+    if args.web and args.token_stdin:
+        raise CliFailure(
+            "usage",
+            "Use either --web or --token-stdin, not both.",
+            exit_code=EXIT_USAGE,
+        )
+    web_identity: dict[str, Any] | None = None
+    if args.web:
+        # `--no-open` is a global flag; it lands in the environment.
+        headless_browser = bool(os.environ.get("BIOSIMULANT_NO_OPEN"))
+        _note(f"Signing in to {origin} through the browser.")
+        try:
+            issued = browser_login(
+                origin,
+                scopes=DEFAULT_WEB_LOGIN_SCOPES,
+                open_browser=not headless_browser,
+                on_url=lambda url: _note(
+                    f"Approve the request here:\n  {url}\n"
+                    if headless_browser
+                    else f"Opening {url}\nWaiting for you to approve it…"
+                ),
+            )
+        except KeyboardInterrupt as exc:
+            raise CliFailure(
+                "cancelled",
+                "Sign-in cancelled; no credentials were stored.",
+                exit_code=EXIT_OPERATION,
+            ) from exc
+        token = str(issued.get("token") or "")
+        web_identity = issued
+    elif args.token_stdin:
         token = sys.stdin.readline().strip()
     elif sys.stdin.isatty():
-        token = getpass.getpass("Registry token: ").strip()
+        _login_guidance(origin)
+        token = _prompt_for_token()
     else:
         raise CliFailure(
             "token_required",
-            "Headless login requires --token-stdin",
+            "Headless sign-in needs a token on stdin: "
+            "printf '%s\\n' \"$TOKEN\" | biosimulant auth login --token-stdin "
+            "(or use --web on a machine with a browser)",
             exit_code=EXIT_USAGE,
         )
-    origin = store_token(args.registry, token)
-    return {"registry": origin, "authenticated": True}
+    if not token:
+        raise CliFailure(
+            "token_required",
+            "No token was provided; nothing was stored.",
+            exit_code=EXIT_USAGE,
+        )
+
+    # Verify before storing so a bad paste fails here, not at the next publish.
+    identity: dict[str, Any] | None = None
+    if not args.no_verify:
+        identity = verify_token(origin, token)
+        if not identity.get("verified"):
+            _note(
+                f"Could not confirm the token with {origin} "
+                f"({identity.get('reason')}); storing it unverified."
+            )
+
+    stored_origin = store_token(args.registry, token)
+    payload: dict[str, Any] = {"registry": stored_origin, "authenticated": True}
+    if identity is not None:
+        payload["verified"] = bool(identity.get("verified"))
+        if identity.get("verified"):
+            payload["account"] = identity.get("account")
+            payload["scopes"] = identity.get("scopes")
+            payload["canPublishPackages"] = identity.get("canPublishPackages")
+            _note(f"Signed in to {stored_origin} as {identity.get('account')}")
+            if not identity.get("canPublishPackages"):
+                _note(
+                    "This credential cannot publish. Add the packages:write "
+                    f"scope at {DEFAULT_TOKEN_CONSOLE_URL} if you need to."
+                    if _is_default_registry(stored_origin)
+                    else "This credential cannot publish."
+                )
+    return payload
 
 
 def _runtime(argv: list[str]) -> dict[str, Any]:
@@ -592,7 +759,34 @@ def _labs_sync_status(argv: list[str]) -> dict[str, Any]:
 
 
 def _cloud_client() -> CloudClient:
-    return CloudClient()
+    """Build a managed-run client, reusing what `auth login` already stored.
+
+    A developer API key authenticates both the registry and the managed-run
+    API, so signing in once should cover both. Only a developer key is reused:
+    registry operation tokens and workspace tokens are scoped to the registry.
+    The fallback is limited to the default API host so a Hub key is never sent
+    to a staging or self-hosted endpoint.
+    """
+
+    if not os.environ.get("BIOSIMULANT_API_KEY", "").strip() and not os.environ.get(
+        "BIOSIMULANT_API_BASE_URL", ""
+    ).strip():
+        try:
+            stored = resolve_token(DEFAULT_REGISTRY)
+        except CredentialError:
+            stored = None
+        if stored and stored.startswith(("bsk_live_", "bsk_test_")):
+            return CloudClient(api_key=stored)
+    try:
+        return CloudClient()
+    except CloudAuthenticationError as exc:
+        raise CliFailure(
+            "authentication_required",
+            "Managed runs need credentials. Run `biosimulant auth login --web`, "
+            "or set BIOSIMULANT_API_KEY to a developer API key from "
+            f"{DEFAULT_TOKEN_CONSOLE_URL}",
+            exit_code=EXIT_AUTH,
+        ) from exc
 
 
 def _runs(argv: list[str]) -> dict[str, Any]:
@@ -636,7 +830,7 @@ def _runs(argv: list[str]) -> dict[str, Any]:
     if args.command in {"start", "upload"}:
         raise CliFailure(
             "capability_unavailable",
-            f"`biosimulant runs {args.command}` is not supported by the configured API",
+            UNAVAILABLE_COMMANDS[f"runs {args.command}"],
             exit_code=EXIT_UNAVAILABLE,
             details={"capability": f"runs.{args.command}"},
         )
@@ -699,7 +893,7 @@ def _jobs(argv: list[str]) -> dict[str, Any]:
     args = parser.parse_args(argv)
     raise CliFailure(
         "capability_unavailable",
-        "`biosimulant jobs` is not supported by the configured API",
+        UNAVAILABLE_COMMANDS[f"jobs {args.command}"],
         exit_code=EXIT_UNAVAILABLE,
         details={"capability": f"jobs.{args.command}"},
     )

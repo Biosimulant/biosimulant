@@ -20,6 +20,7 @@ from .__about__ import __version__
 
 DEFAULT_REGISTRY = "hub.biosimulant.com"
 DEFAULT_HUB_API_BASE = "https://api.biosimulant.com/api"
+DEFAULT_TOKEN_CONSOLE_URL = "https://studio.biosimulant.com/developer"
 CLI_USER_AGENT = f"biosimulant-cli/{__version__}"
 TOKEN_ENV = "BIOSIMULANT_TOKEN"
 WORKSPACE_TOKEN_ENV = "BIOSIMULANT_WORKSPACE_TOKEN"
@@ -130,7 +131,82 @@ def delete_token(registry: str | None) -> bool:
     return removed
 
 
-def credential_status(registry: str | None) -> dict[str, Any]:
+def registry_api_base(registry: str | None = None) -> str:
+    """Return the Registry API v1 base URL for a registry origin."""
+
+    origin = normalize_registry_origin(registry)
+    if origin == normalize_registry_origin(DEFAULT_REGISTRY):
+        return f"{DEFAULT_HUB_API_BASE}/registry/v1"
+    return f"{origin}/api/registry/v1"
+
+
+def verify_token(registry: str | None, token: str) -> dict[str, Any]:
+    """Resolve a token to an account before it is trusted or stored.
+
+    Returns a result dict rather than raising when the registry simply does not
+    implement the identity endpoint: a registry that predates it, or a
+    third-party implementation, must still be usable. A token the registry
+    actively rejects raises ``CredentialError``.
+    """
+
+    origin = normalize_registry_origin(registry)
+    endpoint = f"{registry_api_base(origin)}/auth/whoami"
+    request = Request(endpoint, method="GET")
+    request.add_header("Authorization", f"Bearer {token.strip()}")
+    request.add_header("Accept", "application/json")
+    request.add_header("User-Agent", CLI_USER_AGENT)
+    try:
+        with urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        status_code = int(exc.code)
+        message = _safe_http_error_message(exc)
+        if status_code in {401, 403}:
+            raise CredentialError(
+                f"{origin} rejected this token",
+                code="invalid_registry_token",
+                details={
+                    "registry": origin,
+                    "httpStatus": status_code,
+                    "backendMessage": message,
+                    "tokenSource": DEFAULT_TOKEN_CONSOLE_URL
+                    if origin == normalize_registry_origin(DEFAULT_REGISTRY)
+                    else None,
+                },
+                exit_code=3,
+            ) from exc
+        if status_code in {404, 405, 501}:
+            return {
+                "verified": False,
+                "reason": "unsupported",
+                "registry": origin,
+            }
+        return {
+            "verified": False,
+            "reason": "unavailable",
+            "registry": origin,
+            "httpStatus": status_code,
+        }
+    except (URLError, OSError):
+        return {"verified": False, "reason": "unreachable", "registry": origin}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {"verified": False, "reason": "invalid_response", "registry": origin}
+    if not isinstance(payload, dict):
+        return {"verified": False, "reason": "invalid_response", "registry": origin}
+    scopes = payload.get("scopes")
+    return {
+        "verified": True,
+        "registry": origin,
+        "account": payload.get("email"),
+        "accountId": payload.get("userId"),
+        "authKind": payload.get("authKind"),
+        "scopes": [str(item) for item in scopes] if isinstance(scopes, list) else [],
+        "canReadPackages": bool(payload.get("canReadPackages")),
+        "canPublishPackages": bool(payload.get("canPublishPackages")),
+    }
+
+
+def credential_status(registry: str | None, *, verify: bool = False) -> dict[str, Any]:
     origin = normalize_registry_origin(registry)
     source = None
     if os.environ.get(TOKEN_ENV, "").strip():
@@ -148,7 +224,16 @@ def credential_status(registry: str | None) -> dict[str, Any]:
         source = "keyring"
     elif _file_credentials().get(origin):
         source = "file"
-    return {"registry": origin, "authenticated": source is not None, "source": source}
+    status_payload: dict[str, Any] = {
+        "registry": origin,
+        "authenticated": source is not None,
+        "source": source,
+    }
+    if verify and source is not None:
+        token = resolve_token(origin)
+        if token:
+            status_payload["identity"] = verify_token(origin, token)
+    return status_payload
 
 
 def _file_credentials() -> dict[str, str]:
