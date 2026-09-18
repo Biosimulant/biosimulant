@@ -1000,6 +1000,31 @@ th {
   width: min(520px, calc(100vw - 48px));
 }
 
+.add-to-lab-step {
+  padding: 12px 14px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-alt);
+}
+
+.add-to-lab-step p {
+  margin: 0;
+}
+
+.add-to-lab-command {
+  margin: 8px 0 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.06);
+  font-size: 11px;
+  line-height: 1.5;
+  /* Wrap rather than clip: a long lab path must stay readable and copyable. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 .add-to-lab-signin {
   padding: 14px;
   border: 1px dashed var(--border-strong);

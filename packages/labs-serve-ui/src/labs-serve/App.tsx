@@ -118,7 +118,7 @@ export function App() {
         saved={saved}
       />
       {error ? <div className="error-strip">{error}</div> : null}
-      <UpgradeBanner />
+      <LocalModeBanner />
       <main className="workbench">
         <PanelGroup orientation="horizontal" id="labs-serve" className="workbench-panels">
           {showContents ? (
@@ -193,20 +193,32 @@ export function App() {
           onClose={() => setShowCompare(false)}
         />
       ) : null}
-      {showAdd ? <AddToLabModal onCancel={() => setShowAdd(false)} /> : null}
+      {showAdd ? (
+        <AddToLabModal
+          labPath={labState.lab?.file_path ?? null}
+          onCancel={() => setShowAdd(false)}
+        />
+      ) : null}
     </div>
   );
 }
 
-export function UpgradeBanner() {
+// Class names still read `upgrade-banner`; they are styling hooks in
+// labs-serve.css, not a claim about what the banner says.
+export function LocalModeBanner() {
   const [dismissed, setDismissed] = React.useState(false);
   if (dismissed) return null;
   return (
     <div className="upgrade-banner">
       <span className="upgrade-banner-text">
-        To run remotely, use the Agent, and access more features -{" "}
-        <a href="https://www.biosimulant.com/download/desktop" target="_blank" rel="noreferrer">
-          get the desktop app
+        This lab runs on your machine. Use <code>biosimulant runs create</code> for a
+        managed run, or{" "}
+        <a
+          href="https://docs.biosimulant.com/how-to/agent-gateway"
+          target="_blank"
+          rel="noreferrer"
+        >
+          connect Claude or Codex over MCP
         </a>
         .
       </span>

@@ -1,12 +1,23 @@
-import { DownloadSimpleIcon, XIcon } from "@phosphor-icons/react";
+import { XIcon } from "@phosphor-icons/react";
 
 export type AddToLabModalProps = {
+  /** The lab on disk, so the commands below can be copied as-is. */
+  labPath?: string | null;
   onCancel: () => void;
 };
 
-const DESKTOP_DOWNLOAD_URL = "https://www.biosimulant.com/download/desktop";
+const DOCS_URL = "https://docs.biosimulant.com/references/cli";
 
-export function AddToLabModal({ onCancel }: AddToLabModalProps) {
+function Command({ children }: { children: string }) {
+  return (
+    <pre className="add-to-lab-command">
+      <code>{children}</code>
+    </pre>
+  );
+}
+
+export function AddToLabModal({ labPath, onCancel }: AddToLabModalProps) {
+  const lab = labPath || "<lab>";
   return (
     <div className="modal-backdrop" onClick={onCancel}>
       <form
@@ -21,21 +32,43 @@ export function AddToLabModal({ onCancel }: AddToLabModalProps) {
           </button>
         </div>
         <div className="modal-body">
-          <div className="add-to-lab-signin">
+          <p className="muted small">
+            This page edits and runs the lab that is already on disk. Add models and child labs
+            with the <code>biosimulant</code> CLI, then refresh to pick them up.
+          </p>
+
+          <div className="add-to-lab-step">
             <p>
-              <strong>Adding models and child labs is available in the desktop app.</strong>
+              <strong>A model already inside the lab folder</strong>
             </p>
+            <Command>{`biosimulant labs add-model --lab ${lab} --alias growth models/growth`}</Command>
+            <p className="muted small">The model path is relative to the lab.</p>
+          </div>
+
+          <div className="add-to-lab-step">
+            <p>
+              <strong>A model from somewhere else</strong>
+            </p>
+            <Command>{`biosimulant labs vendor-model --lab ${lab} --alias growth /path/to/model`}</Command>
+            <p className="muted small">This copies it into the lab source tree.</p>
+          </div>
+
+          <div className="add-to-lab-step">
+            <p>
+              <strong>A published lab or model from the Hub</strong>
+            </p>
+            <Command>{`biosimulant labs search glycolysis
+biosimulant labs pull demi/bakker2001-glycolysis@1.0.0 --target ./downloaded`}</Command>
             <p className="muted small">
-              The web UI you are using runs locally via <code>biosimulant labs serve</code> and supports editing and
-              running an existing lab. To browse the Hub, import packages, or add new components to this lab, install
-              the Biosimulant Desktop app.
-            </p>
-            <p>
-              <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noreferrer">
-                <DownloadSimpleIcon size={12} aria-hidden /> Get the Biosimulant Desktop app →
-              </a>
+              Then vendor it in with the command above. Public packages need no sign-in.
             </p>
           </div>
+
+          <p className="muted small">
+            <a href={DOCS_URL} target="_blank" rel="noreferrer">
+              Full CLI reference →
+            </a>
+          </p>
         </div>
         <div className="modal-footer">
           <button type="button" className="button" onClick={onCancel}>
