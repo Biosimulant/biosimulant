@@ -7,6 +7,44 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.35] - 2026-09-18
+
+### Added
+
+- `biosimulant auth login --web` signs in through the browser. The console
+  mints the key and hands it back over a loopback listener bound to a state
+  this process generated, so no secret passes through a URL, a redirect or a
+  shell history.
+- `auth login` resolves a token to an account before storing it, and
+  `auth status --verify` does the same for one already stored. A registry with
+  no identity endpoint reports that the check was skipped and stores the token
+  anyway, so other Registry API v1 services keep working.
+- List the `compatibility` commands in `commands list`. They already ran, but
+  the catalog the docs are generated from did not mention them.
+- `commands list` entries carry `available`, and `unavailableReason` when it is
+  false.
+
+### Changed
+
+- `biosimulant runs` reuses the credential `auth login` stored when
+  `BIOSIMULANT_API_KEY` is unset, so one account does not need signing in to
+  twice. Only a developer API key is reused, and only against the default API
+  host.
+- `runs start`, `runs upload`, `jobs list` and `jobs get` say what to use
+  instead. None of them can succeed against the public API, and they are now
+  listed as unavailable rather than published as working commands.
+- The `labs serve` UI points at `runs create` and the MCP server rather than
+  another application, and its "Add to lab" dialog gives the `add-model`,
+  `vendor-model` and `pull` commands with the lab's own path filled in.
+
+### Fixed
+
+- Cancelling the sign-in prompt with Ctrl-C reports that it was cancelled
+  instead of printing a traceback.
+- `auth login` names the registry it is signing in to, says the token is a
+  developer API key and where to create one, and says that local runs and
+  public pulls need no sign-in at all.
+
 ## [0.0.34] - 2026-09-17
 
 ### Added
@@ -340,7 +378,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Preserve the legacy `biosim` import path and `python -m biosim` compatibility
   command for existing model packages.
 
-[Unreleased]: https://github.com/Biosimulant/biosimulant/compare/v0.0.19...HEAD
+[Unreleased]: https://github.com/Biosimulant/biosimulant/compare/v0.0.35...HEAD
 [0.0.19]: https://github.com/Biosimulant/biosimulant/compare/v0.0.18...v0.0.19
 [0.0.18]: https://github.com/Biosimulant/biosimulant/compare/v0.0.17...v0.0.18
 [0.0.17]: https://github.com/Biosimulant/biosimulant/compare/v0.0.16...v0.0.17
