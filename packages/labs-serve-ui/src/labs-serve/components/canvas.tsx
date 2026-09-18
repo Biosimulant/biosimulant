@@ -3,17 +3,18 @@ import {
   Background,
   Controls,
   Handle,
-  Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useReactFlow,
+  useStore,
   type Edge,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { CircleNotchIcon, FlaskIcon, GitBranchIcon, GlobeIcon, MagicWandIcon, PlusIcon } from "@phosphor-icons/react";
+import { CircleNotchIcon, FlaskIcon, GitBranchIcon, GlobeIcon, MagicWandIcon } from "@phosphor-icons/react";
 import "@xyflow/react/dist/style.css";
 import { WORLD_INPUT_RAIL_ID, WORLD_OUTPUT_RAIL_ID, type LocalLab, type Selection } from "../types";
 import {
@@ -55,16 +56,29 @@ function PortLabel({ kind, text }: { kind: "Input" | "Output"; text: string }) {
   );
 }
 
+const PORT_DETAIL_ZOOM = 0.55;
+
 function ModuleNode({ data, id, selected }: NodeProps<Node<ModelNodeData>>) {
   const Icon = data.kind === "lab" ? GitBranchIcon : FlaskIcon;
+  // Below this zoom the port names render as unreadable specks, so the node
+  // shows what it is and how many ports it has instead.
+  const detailed = useStore((state) => state.transform[2] >= PORT_DETAIL_ZOOM);
+  const portCount = data.inputs.length + data.outputs.length;
   return (
-    <div className={`flow-node ${selected ? "selected" : ""}`} data-node-id={id}>
+    <div className={`flow-node ${selected ? "selected" : ""} ${detailed ? "" : "compact"}`} data-node-id={id}>
       <div className="flow-node-top">
         <Icon size={14} />
         <span className="flow-node-title">{data.title}</span>
       </div>
       <div className="flow-node-subtitle">{data.subtitle}</div>
-      <div className="flow-node-ports">
+      {!detailed ? (
+        <>
+          <div className="flow-node-portcount">{portCount} ports</div>
+          <Handle type="target" position={Position.Left} className="flow-port-handle" />
+          <Handle type="source" position={Position.Right} className="flow-port-handle" />
+        </>
+      ) : null}
+      <div className="flow-node-ports" hidden={!detailed}>
         <div className="flow-port-column">
           <div className="flow-port-column-label">INPUTS</div>
           {data.inputs.length === 0 ? (
@@ -184,13 +198,14 @@ export type CanvasProps = {
   lab: LocalLab | null;
   selection: Selection;
   onSelect: (sel: Selection) => void;
-  onAddClick?: () => void;
   onLayoutChange?: (nodes: Array<{ id: string; position: { x: number; y: number } }>) => void;
+  /** Wire key ("module.port->module.port") to the mode the last run recorded. */
+  wireModes?: Record<string, string>;
   readOnly?: boolean;
   loading?: boolean;
 };
 
-function CanvasInner({ lab, selection, onSelect, onAddClick, onLayoutChange, readOnly, loading }: CanvasProps) {
+function CanvasInner({ lab, selection, onSelect, onLayoutChange, wireModes, readOnly, loading }: CanvasProps) {
   const initial = React.useMemo(
     () => (lab ? buildGraph(lab) : { nodes: [] as Node[], edges: [] as Edge[] }),
     [lab],
@@ -257,6 +272,34 @@ function CanvasInner({ lab, selection, onSelect, onAddClick, onLayoutChange, rea
     [nodes, selectedIds],
   );
 
+  const decoratedEdges = React.useMemo(() => {
+    if (!wireModes || !Object.keys(wireModes).length) return edges;
+    return edges.map((edge) => {
+      const key = `${edge.sourceHandle ?? edge.source}->${edge.targetHandle ?? edge.target}`;
+      const mode = wireModes[key];
+      return mode ? { ...edge, className: `${edge.className ?? ""} wire-${mode}`.trim() } : edge;
+    });
+  }, [edges, wireModes]);
+
+  // fitView runs once on mount; the panels around the canvas settle after that,
+  // so without this the graph keeps whatever zoom the first layout pass gave it.
+  const flow = useReactFlow();
+  const paneRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    const element = paneRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => flow.fitView({ padding: 0.12, maxZoom: 1 }));
+    });
+    observer.observe(element);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [flow]);
+
   const [hoverToast, setHoverToast] = React.useState<{
     kind: "Input" | "Output";
     text: string;
@@ -284,7 +327,7 @@ function CanvasInner({ lab, selection, onSelect, onAddClick, onLayoutChange, rea
 
   return (
     <HoverToastContext.Provider value={hoverHandlers}>
-    <div className="serve-canvas">
+    <div className="serve-canvas" ref={paneRef}>
       <div className="canvas-toolbar">
         <button className="toolbar-button" onClick={handleTidy} title="Auto-arrange nodes">
           <MagicWandIcon size={14} />
@@ -319,10 +362,11 @@ function CanvasInner({ lab, selection, onSelect, onAddClick, onLayoutChange, rea
       ) : (
         <ReactFlow
           nodes={decoratedNodes}
-          edges={edges}
+          edges={decoratedEdges}
           nodeTypes={nodeTypes}
           fitView
-          minZoom={0.2}
+          fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
+          minZoom={0.35}
           maxZoom={1.6}
           nodesDraggable={!readOnly}
           onNodesChange={onNodesChange}
@@ -334,32 +378,8 @@ function CanvasInner({ lab, selection, onSelect, onAddClick, onLayoutChange, rea
         >
           <Background />
           <Controls showInteractive={false} />
-          {onAddClick ? (
-            <Panel position="bottom-right" className="canvas-add-panel">
-              <button
-                type="button"
-                className="canvas-add-button"
-                onClick={onAddClick}
-                title="Add model or nested lab"
-              >
-                <PlusIcon size={16} />
-                <span>Add</span>
-              </button>
-            </Panel>
-          ) : null}
         </ReactFlow>
       )}
-      {onAddClick && decoratedNodes.length === 0 ? (
-        <button
-          type="button"
-          className="canvas-add-button canvas-add-button-empty"
-          onClick={onAddClick}
-          title="Add model or nested lab"
-        >
-          <PlusIcon size={16} />
-          <span>Add</span>
-        </button>
-      ) : null}
       {hoverToast ? <PortHoverToast toast={hoverToast} /> : null}
     </div>
     </HoverToastContext.Provider>

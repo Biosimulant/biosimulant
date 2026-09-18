@@ -41,5 +41,14 @@ export function useLab(): LabState {
     return () => window.clearTimeout(timer);
   }, [lab?.runtime_metadata_status, refresh]);
 
+  // An agent edits the same lab through MCP, so the page keeps reading it back.
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      void refresh();
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
   return { lab, error, refreshing, refresh, setLab };
 }

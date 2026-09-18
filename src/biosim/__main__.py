@@ -124,6 +124,10 @@ def _labs_serve_child_argv(args: argparse.Namespace, resolved_lab_path: Path) ->
     child_argv.append("--open" if args.open_browser else "--no-open")
     if args.no_install_deps:
         child_argv.append("--no-install-deps")
+    if not getattr(args, "agent", True):
+        child_argv.append("--no-agent")
+    if getattr(args, "agent_read_only", False):
+        child_argv.append("--agent-read-only")
     if args.json_output:
         child_argv.append("--json")
     return child_argv
@@ -483,6 +487,18 @@ def _populate_labs_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
     serve_parser.add_argument("--open", action="store_true", dest="open_browser", help="Open browser automatically (default)")
     serve_parser.add_argument("--no-open", action="store_false", dest="open_browser", help="Do not open a browser automatically")
     serve_parser.add_argument("--no-install-deps", action="store_true")
+    serve_parser.set_defaults(agent=True)
+    serve_parser.add_argument(
+        "--no-agent",
+        action="store_false",
+        dest="agent",
+        help="Do not expose this lab to a local agent over MCP",
+    )
+    serve_parser.add_argument(
+        "--agent-read-only",
+        action="store_true",
+        help="Let a connected agent read the lab but not change or run it",
+    )
     serve_parser.add_argument("--json", action="store_true", dest="json_output")
 
     create_parser = subparsers.add_parser("create", help="Create a managed local lab source tree")
@@ -904,6 +920,8 @@ def _main_labs(argv: list[str], *, prog: str = "biosimulant labs") -> None:
                         open_browser=args.open_browser,
                         install_deps=not args.no_install_deps,
                         emit_json=args.json_output,
+                        agent=args.agent,
+                        agent_read_only=args.agent_read_only,
                     )
             else:
                 serve_lab(
@@ -913,6 +931,8 @@ def _main_labs(argv: list[str], *, prog: str = "biosimulant labs") -> None:
                     open_browser=args.open_browser,
                     install_deps=not args.no_install_deps,
                     emit_json=args.json_output,
+                    agent=args.agent,
+                    agent_read_only=args.agent_read_only,
                 )
             return
     except CompatibilityError as exc:

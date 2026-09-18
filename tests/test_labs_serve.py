@@ -45,11 +45,22 @@ class _RuntimeModule:
     output_specs = {"runtime_out": _RuntimeSpec("runtime output")}
 
 
+class _RuntimeCompatibility:
+    def to_dict(self) -> dict[str, object]:
+        return {"connections": []}
+
+
 class _RuntimeWorld:
     _modules = {"counter": _RuntimeModule()}
+    # The real world carries these too, and serve records both in run results.
+    module_names = ("counter",)
+    compatibility = _RuntimeCompatibility()
 
     def __init__(self) -> None:
         self._listeners: list[object] = []
+
+    def get_outputs(self, module_name: str) -> dict[str, object]:
+        return {}
 
     def on(self, listener) -> None:
         self._listeners.append(listener)

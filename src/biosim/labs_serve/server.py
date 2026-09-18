@@ -7,6 +7,7 @@ import os
 import platform
 import signal
 import shutil
+import secrets
 import socket
 import subprocess
 import sys
@@ -19,9 +20,9 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Mapping
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -42,6 +43,9 @@ from biosim.run_overrides import (
 from biosim.workspace import get_lab as workspace_get_lab
 from biosim.workspace import save_lab as workspace_save_lab
 from biosim.world import WorldEvent
+
+from . import mcp as _mcp
+from .mcp import LabMcpServer
 
 
 ACTIVE_STATUSES = {"queued", "pending", "running", "cancelling"}
@@ -1155,8 +1159,11 @@ class LabServeSession:
             entry["resolution_error"] = str(exc)
 
     def list_runs(self) -> list[dict[str, Any]]:
+        """Newest first, so the page and an agent both lead with the latest run."""
+
         with self._lock:
-            return [run.to_dict() for run in self._runs.values()]
+            runs = [run.to_dict() for run in self._runs.values()]
+        return sorted(runs, key=lambda run: str(run.get("created_at") or ""), reverse=True)
 
     def get_run(self, run_id: str) -> RunRecord:
         with self._lock:
@@ -1543,12 +1550,24 @@ class LabServeSession:
                             run_id=run.id,
                             artifacts=artifacts,
                         )
+                    # Match what `labs run` records, so the page and a connected
+                    # agent see the same outputs and compatibility evidence.
+                    outputs = {
+                        module_name: {
+                            port_name: signal.to_dict()
+                            for port_name, signal in world.get_outputs(module_name).items()
+                        }
+                        for module_name in world.module_names
+                        if world.get_outputs(module_name)
+                    }
                     result = {
                         "visuals": visuals,
+                        "outputs": outputs,
                         "duration": prepared.duration,
                         "communication_step": prepared.communication_step,
                         "settle_steps": prepared.settle_steps,
                         "modules": prepared.modules,
+                        "compatibility": world.compatibility.to_dict(),
                     }
                     durable_artifacts = self._run_store.persist_artifacts(
                         run.id,
@@ -1563,8 +1582,29 @@ class LabServeSession:
                     world.off(listener)
 
 
-def create_app(session: LabServeSession) -> FastAPI:
+def _mcp_origin_allowed(origin: str | None) -> bool:
+    """Only this machine may drive the lab, so reject any browser origin.
+
+    A page on the web can POST to a localhost server, so an MCP endpoint that
+    trusted every caller would hand any site the user visits a way to edit and
+    run their lab. Agents send no Origin at all; our own page sends a local one.
+    """
+
+    if not origin or origin == "null":
+        return True
+    host = urlparse(origin).hostname or ""
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def create_app(
+    session: LabServeSession,
+    *,
+    mcp_token: str | None = None,
+    mcp_enabled: bool = True,
+    mcp_read_only: bool = False,
+) -> FastAPI:
     app = FastAPI(title="Biosimulant Labs Serve")
+    mcp_server = LabMcpServer(session, read_only=mcp_read_only) if mcp_enabled else None
 
     @app.exception_handler(RunConflictError)
     async def run_conflict_handler(_request: Request, exc: RunConflictError) -> JSONResponse:
@@ -1660,6 +1700,50 @@ def create_app(session: LabServeSession) -> FastAPI:
             return body
         return _api_ok({"lab": session.save_layout(body)})
 
+    @app.get("/api/agent")
+    def agent_connection() -> JSONResponse:
+        """What the page needs to show someone how to connect their agent."""
+
+        return _api_ok(
+            {
+                "agent": {
+                    "enabled": mcp_server is not None,
+                    "read_only": mcp_read_only,
+                    "token": mcp_token,
+                    "path": "/mcp",
+                    "tools": [tool["name"] for tool in mcp_server.list_tools()]
+                    if mcp_server
+                    else [],
+                }
+            }
+        )
+
+    @app.post("/mcp")
+    async def mcp_endpoint(request: Request) -> Response:
+        if mcp_server is None:
+            return _api_error("The agent endpoint is disabled for this lab", status_code=404)
+        if not _mcp_origin_allowed(request.headers.get("origin")):
+            return _api_error("Cross-site requests cannot reach the agent endpoint", status_code=403)
+        if mcp_token:
+            header = request.headers.get("authorization", "")
+            presented = header[7:].strip() if header.lower().startswith("bearer ") else ""
+            if not secrets.compare_digest(presented, mcp_token):
+                return _api_error("The agent endpoint needs the token printed by serve", status_code=401)
+        raw = await request.body()
+        try:
+            message = json.loads(raw) if raw else None
+        except json.JSONDecodeError:
+            return JSONResponse(
+                status_code=400,
+                content=_mcp.jsonrpc_error(None, _mcp.JSONRPC_PARSE_ERROR, "Invalid JSON"),
+            )
+        if isinstance(message, list):
+            replies = [reply for reply in (mcp_server.handle(item) for item in message) if reply]
+            return JSONResponse(content=replies) if replies else Response(status_code=202)
+        reply = mcp_server.handle(message)
+        # Notifications get no body; MCP expects a bare 202 for them.
+        return JSONResponse(content=reply) if reply else Response(status_code=202)
+
     return app
 
 
@@ -1671,11 +1755,20 @@ def serve_lab(
     open_browser: bool,
     install_deps: bool = True,
     emit_json: bool = False,
+    agent: bool = True,
+    agent_read_only: bool = False,
 ) -> None:
     import uvicorn
 
     session = LabServeSession(lab_path, install_deps=install_deps)
-    app = create_app(session)
+    # The token keeps the agent endpoint to whoever can read this terminal.
+    mcp_token = secrets.token_urlsafe(24) if agent else None
+    app = create_app(
+        session,
+        mcp_token=mcp_token,
+        mcp_enabled=agent,
+        mcp_read_only=agent_read_only,
+    )
     sock = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1698,11 +1791,29 @@ def serve_lab(
                     "url": url,
                     "host": host,
                     "port": actual_port,
+                    "agent": {
+                        "enabled": bool(agent),
+                        "read_only": bool(agent_read_only),
+                        "url": f"{url.rstrip('/')}/mcp",
+                        "token": mcp_token,
+                    },
                 }
             ),
             flush=True,
         )
     print(f"Starting Biosimulant lab UI: {url}", flush=True)
+    if agent and mcp_token:
+        mcp_url = f"{url.rstrip('/')}/mcp"
+        print("", flush=True)
+        print("Connect an agent to this lab:", flush=True)
+        print(
+            "  claude mcp add --transport http biosimulant-lab "
+            f'{mcp_url} --header "Authorization: Bearer {mcp_token}"',
+            flush=True,
+        )
+        if agent_read_only:
+            print("  (read-only: the agent can read the lab but not change or run it)", flush=True)
+        print("", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     if open_browser:
         try:

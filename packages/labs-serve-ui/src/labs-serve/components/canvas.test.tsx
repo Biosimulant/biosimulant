@@ -46,6 +46,10 @@ vi.mock("@xyflow/react", async () => {
       const [nodes, setNodes] = React.useState(initial);
       return [nodes, setNodes, () => undefined];
     },
+    useReactFlow: () => ({ fitView: () => undefined }),
+    // The canvas reads the live zoom to decide how much node detail to draw.
+    useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
+      selector({ transform: [0, 0, 1] }),
   };
 });
 

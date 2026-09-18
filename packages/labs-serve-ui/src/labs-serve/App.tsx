@@ -2,79 +2,67 @@ import * as React from "react";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 import "@xyflow/react/dist/style.css";
 import "./labs-serve.css";
-import { serveApi, type CreateRunBody, type UpdateModelBody, type UpdateWorldBody } from "./api";
-import type { LocalLab, Selection } from "./types";
+import { serveApi, type CreateRunBody } from "./api";
+import type { AgentConnection, Selection } from "./types";
 import { useLab } from "./hooks/use-lab";
 import { useRuns } from "./hooks/use-runs";
 import { useTheme } from "./hooks/use-theme";
 import { Header } from "./components/header";
 import { ContentsSidebar } from "./components/contents-sidebar";
 import { Canvas } from "./components/canvas";
-import { Inspector } from "./components/inspector";
-import { RunStatus } from "./components/run-status";
+import { Dock, type DockTab } from "./components/dock";
 import { PreRunModal, type PreRunSubmit } from "./components/pre-run-modal";
 import { CompareOverlay } from "./components/compare-overlay";
-import { AddToLabModal } from "./components/add-to-lab-modal";
+import { compatibilityByWire } from "./components/outcome";
 
 export function App() {
   const [theme, setTheme] = useTheme();
   const labState = useLab();
   const runsState = useRuns();
   const [selection, setSelection] = React.useState<Selection>({ kind: "world" });
-  const [leftOpen, setLeftOpen] = React.useState(true);
-  const [rightOpen, setRightOpen] = React.useState(true);
+  const [contentsOpen, setContentsOpen] = React.useState(true);
+  const [dockOpen, setDockOpen] = React.useState(true);
+  const [dockTab, setDockTab] = React.useState<DockTab>("results");
   const [showPreRun, setShowPreRun] = React.useState(false);
-  const [showAdd, setShowAdd] = React.useState(false);
   const [comparedIds, setComparedIds] = React.useState<Set<string>>(new Set());
   const [showCompare, setShowCompare] = React.useState(false);
-  const [saved, setSaved] = React.useState(true);
+  const [agent, setAgent] = React.useState<AgentConnection | null>(null);
 
-  // Combined error from either sub-state.
   const error = labState.error || runsState.error;
 
-  function applyLabUpdate(lab: LocalLab) {
-    labState.setLab(lab);
-    setSaved(true);
-  }
+  // The panel group sets its own direction, so a narrow window gives the
+  // canvas room by folding the contents rail away rather than by stacking.
+  React.useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const narrow = window.matchMedia("(max-width: 900px)");
+    const apply = () => setContentsOpen(!narrow.matches);
+    apply();
+    narrow.addEventListener("change", apply);
+    return () => narrow.removeEventListener("change", apply);
+  }, []);
 
-  async function handleSaveModel(alias: string, body: UpdateModelBody) {
-    setSaved(false);
-    try {
-      const { lab } = await serveApi.updateModel(alias, body);
-      applyLabUpdate(lab);
-    } catch (err) {
-      // Fall back to a refresh if the endpoint doesn't exist yet (Track C may not be deployed).
-      await labState.refresh();
-      throw err;
-    }
-  }
+  React.useEffect(() => {
+    serveApi
+      .agent()
+      .then(({ agent: connection }) => setAgent(connection))
+      .catch(() => setAgent(null));
+  }, []);
 
-  async function handleSaveWorld(body: UpdateWorldBody) {
-    setSaved(false);
-    try {
-      const { lab } = await serveApi.updateWorld(body);
-      applyLabUpdate(lab);
-    } catch (err) {
-      await labState.refresh();
-      throw err;
-    }
-  }
-
+  // Layout is the one thing this page still writes; everything else is the agent's job.
   async function handleLayoutChange(
     nodes: Array<{ id: string; position: { x: number; y: number } }>,
   ) {
-    setSaved(false);
     try {
       const { lab } = await serveApi.saveLayout({ nodes });
-      applyLabUpdate(lab);
+      labState.setLab(lab);
     } catch {
-      // Layout-only failure is non-fatal — the position stays in canvas state until next refresh.
-      setSaved(true);
+      // A layout that fails to save is not worth interrupting anyone over.
     }
   }
 
   async function handleRunSubmit(payload: PreRunSubmit) {
     setShowPreRun(false);
+    setDockTab("log");
     const body: CreateRunBody = {
       parameters: payload.parameters,
       simulation_config: payload.simulation_config,
@@ -95,9 +83,10 @@ export function App() {
     });
   }
 
-  const showContents = leftOpen;
-  const showRight = rightOpen;
-  const showInspector = selection.kind !== "none";
+  const wireModes = React.useMemo(
+    () => compatibilityByWire(runsState.results?.compatibility ?? null),
+    [runsState.results],
+  );
 
   return (
     <div className="serve-root">
@@ -105,75 +94,73 @@ export function App() {
         lab={labState.lab}
         activeRun={runsState.activeRun}
         busy={runsState.busy}
-        onToggleLeft={() => setLeftOpen((v) => !v)}
-        onToggleRight={() => setRightOpen((v) => !v)}
+        agent={agent}
+        onToggleLeft={() => setContentsOpen((open) => !open)}
+        onToggleRight={() => setDockOpen((open) => !open)}
         onRefresh={() => {
           void labState.refresh();
           void runsState.refresh();
         }}
         onRunClick={() => setShowPreRun(true)}
         onCancel={() => void runsState.cancelRun()}
+        onAgentClick={() => {
+          setDockOpen(true);
+          setDockTab("agent");
+        }}
         theme={theme}
         onThemeChange={setTheme}
-        saved={saved}
       />
       {error ? <div className="error-strip">{error}</div> : null}
-      <LocalModeBanner />
       <main className="workbench">
         <PanelGroup orientation="horizontal" id="labs-serve" className="workbench-panels">
-          {showContents ? (
+          {contentsOpen ? (
             <>
-              <Panel defaultSize="16%" minSize="10%" maxSize="30%">
+              <Panel defaultSize="14%" minSize="10%" maxSize="24%">
                 <ContentsSidebar
                   lab={labState.lab}
                   selection={selection}
-                  onSelect={setSelection}
+                  onSelect={(next) => {
+                    setSelection(next);
+                    setDockTab("details");
+                  }}
                 />
               </Panel>
               <PanelResizeHandle className="resize-handle" />
             </>
           ) : null}
-          <Panel defaultSize={showInspector ? "44%" : "60%"} minSize="30%">
+          <Panel minSize="35%">
             <Canvas
               lab={labState.lab}
               loading={labState.refreshing && !labState.lab}
               selection={selection}
-              onSelect={setSelection}
+              wireModes={wireModes}
+              onSelect={(next) => {
+                setSelection(next);
+                if (next.kind !== "none") setDockTab("details");
+              }}
               onLayoutChange={handleLayoutChange}
-              onAddClick={() => setShowAdd(true)}
             />
           </Panel>
-          {showInspector ? (
+          {dockOpen ? (
             <>
               <PanelResizeHandle className="resize-handle" />
-              <Panel defaultSize="20%" minSize="15%" maxSize="32%">
-                <Inspector
+              <Panel defaultSize="26%" minSize="20%" maxSize="40%">
+                <Dock
                   lab={labState.lab}
                   selection={selection}
-                  onClose={() => setSelection({ kind: "none" })}
-                  onSaveModel={handleSaveModel}
-                  onSaveWorld={handleSaveWorld}
+                  run={runsState.selectedRun}
+                  runs={runsState.runs}
+                  results={runsState.results}
+                  logs={runsState.logs}
+                  selectedRunId={runsState.selectedRunId}
+                  onSelectRun={(id) => void runsState.refresh(id)}
+                  comparedIds={comparedIds}
+                  onCompareToggle={toggleCompared}
+                  onOpenCompare={() => setShowCompare(true)}
+                  agent={agent}
+                  tab={dockTab}
+                  onTabChange={setDockTab}
                 />
-              </Panel>
-            </>
-          ) : null}
-          {showRight ? (
-            <>
-              <PanelResizeHandle className="resize-handle" />
-              <Panel defaultSize="22%" minSize="16%" maxSize="36%">
-                <div className="right-stack">
-                  <RunStatus
-                    run={runsState.selectedRun}
-                    results={runsState.results}
-                    logs={runsState.logs}
-                    runs={runsState.runs}
-                    selectedRunId={runsState.selectedRunId}
-                    onSelectRun={(id) => void runsState.refresh(id)}
-                    comparedIds={comparedIds}
-                    onCompareToggle={toggleCompared}
-                    onOpenCompare={() => setShowCompare(true)}
-                  />
-                </div>
               </Panel>
             </>
           ) : null}
@@ -193,43 +180,6 @@ export function App() {
           onClose={() => setShowCompare(false)}
         />
       ) : null}
-      {showAdd ? (
-        <AddToLabModal
-          labPath={labState.lab?.file_path ?? null}
-          onCancel={() => setShowAdd(false)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-// Class names still read `upgrade-banner`; they are styling hooks in
-// labs-serve.css, not a claim about what the banner says.
-export function LocalModeBanner() {
-  const [dismissed, setDismissed] = React.useState(false);
-  if (dismissed) return null;
-  return (
-    <div className="upgrade-banner">
-      <span className="upgrade-banner-text">
-        This lab runs on your machine. Use <code>biosimulant runs create</code> for a
-        managed run, or{" "}
-        <a
-          href="https://docs.biosimulant.com/how-to/agent-gateway"
-          target="_blank"
-          rel="noreferrer"
-        >
-          connect Claude or Codex over MCP
-        </a>
-        .
-      </span>
-      <button
-        type="button"
-        className="upgrade-banner-dismiss"
-        aria-label="Dismiss"
-        onClick={() => setDismissed(true)}
-      >
-        ×
-      </button>
     </div>
   );
 }

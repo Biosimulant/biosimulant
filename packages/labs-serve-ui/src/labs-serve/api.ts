@@ -1,4 +1,5 @@
 import type {
+  AgentConnection,
   ApiEnvelope,
   LocalLab,
   LocalRun,
@@ -45,6 +46,7 @@ export type LayoutBody = {
 
 export const serveApi = {
   lab: () => request<{ lab: LocalLab }>("/api/lab"),
+  agent: () => request<{ agent: AgentConnection }>("/api/agent"),
   runs: () => request<{ runs: LocalRun[] }>("/api/runs"),
   createRun: (body: CreateRunBody = {}) =>
     request<{ run: LocalRun }>("/api/runs", {

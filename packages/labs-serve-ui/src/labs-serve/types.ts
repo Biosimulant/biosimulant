@@ -173,9 +173,46 @@ export type RunModuleVisuals = {
   visuals: RunVisualSpec[];
 };
 
+export type RunOutputSignal = {
+  value?: unknown;
+  spec?: { emitted_unit?: string | null; description?: string | null } | null;
+  [key: string]: unknown;
+};
+
+export type CompatibilityWire = {
+  source: { module: string; port: string; profile?: string | null };
+  target: { module: string; port: string; profile?: string | null };
+  mode: "verified" | "partial" | "structural" | "blocked" | string;
+  status?: string;
+  issues?: string[];
+};
+
+export type CompatibilityRecord = {
+  summary?: {
+    wires?: number;
+    verified?: number;
+    partial?: number;
+    structural?: number;
+    blocked?: number;
+  };
+  wires?: CompatibilityWire[];
+  runtime_version?: string;
+  [key: string]: unknown;
+};
+
 export type ServeResults = {
   visuals?: RunModuleVisuals[];
+  outputs?: Record<string, Record<string, RunOutputSignal>>;
+  compatibility?: CompatibilityRecord;
   [key: string]: unknown;
+};
+
+export type AgentConnection = {
+  enabled: boolean;
+  read_only: boolean;
+  token: string | null;
+  path: string;
+  tools: string[];
 };
 
 // UI-side aliases for canvas selection — mirrors compose-canvas-types.ts in the desktop app.
