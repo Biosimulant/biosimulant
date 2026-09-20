@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import hashlib
+import shutil
+import yaml
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZipFile
@@ -261,20 +263,44 @@ wiring:
     return path
 
 
+def _component_lab(model_dir: Path, package_name: str | None = None, version: str | None = None) -> Path:
+    manifest = yaml.safe_load((model_dir / "model.yaml").read_text())
+    lab = model_dir.parent / (model_dir.name + "-lab")
+    lab.mkdir(exist_ok=True)
+    shutil.copytree(model_dir, lab / "owned" / "models" / "main", dirs_exist_ok=True)
+    runtime = dict(manifest.get("runtime") or {})
+    runtime.setdefault("duration", 0.2)
+    runtime.setdefault("communication_step", manifest["biosim"].get("communication_step", 0.1))
+    inputs = runtime.get("initial_inputs") or {}
+    runtime["initial_inputs"] = {"main": inputs} if inputs else {}
+    (lab / "lab.yaml").write_text(yaml.safe_dump({
+        "schema_version": "2.0", "title": manifest.get("title", "Test lab"),
+        "package": package_name or manifest.get("package", "local/counter"),
+        "version": version or manifest.get("version", "1.0.0"),
+        "models": [{"path": "owned/models/main", "alias": "main"}],
+        "wiring": [], "runtime": runtime,
+    }, sort_keys=False))
+    return lab
+
+
+def _build_component_lab(model_dir: Path, **kwargs) -> Path:
+    return build_package(_component_lab(model_dir, kwargs.get("package_name"), kwargs.get("version")), **kwargs)
+
+
 def test_build_validate_and_unpack_model_package(tmp_path: Path):
     model_dir = _write_counter_model(tmp_path / "counter")
-    package_path = build_package(
+    package_path = _build_component_lab(
         model_dir, package_name="local/counter", version="1.0.0"
     )
 
     validation = validate_package(package_path)
     assert validation.valid
     assert validation.metadata["package"] == "local/counter"
-    assert validation.metadata["package_type"] == "model"
+    assert validation.metadata["package_type"] == "lab"
 
     unpacked = unpack_package(package_path, dest=tmp_path / "unpacked")
-    assert (unpacked / "payload" / "model.yaml").exists()
-    assert (unpacked / "payload" / "src" / "counter.py").exists()
+    assert (unpacked / "payload" / "lab.yaml").exists()
+    assert (unpacked / "payload" / "owned" / "models" / "main" / "src" / "counter.py").exists()
 
 
 def test_build_uses_manifest_declared_package_and_version(tmp_path: Path):
@@ -283,7 +309,7 @@ def test_build_uses_manifest_declared_package_and_version(tmp_path: Path):
         package_name="manifest/counter",
         version="2.3.4",
     )
-    package_path = build_package(model_dir)
+    package_path = _build_component_lab(model_dir)
 
     validation = validate_package(package_path)
     assert validation.valid
@@ -293,12 +319,12 @@ def test_build_uses_manifest_declared_package_and_version(tmp_path: Path):
 
 def test_model_package_run_smoke(tmp_path: Path):
     model_dir = _write_counter_model(tmp_path / "counter")
-    package_path = build_package(
+    package_path = _build_component_lab(
         model_dir, package_name="local/counter", version="1.0.0"
     )
     result = run_package(package_path, install_deps=False)
     assert result["package"] == "local/counter"
-    assert "count" in result["outputs"]
+    assert "count" in result["outputs"]["main"]
 
 
 def test_execute_only_model_package_uses_bioworld_policy(tmp_path: Path):
@@ -346,13 +372,15 @@ class ExecuteModel(BioModule):
         encoding="utf-8",
     )
 
-    package_path = build_package(
+    package_path = _build_component_lab(
         model_dir, package_name="local/execute-model", version="1.0.0"
     )
     result = run_package(package_path, install_deps=False)
 
-    assert result["outputs"] == ["value"]
-    assert result["state"] == {"calls": 1}
+    assert "value" in result["outputs"]["main"]
+    prepared = prepare_lab_package(package_path, install_deps=False)
+    prepared.world.run(duration=prepared.duration)
+    assert prepared.world.snapshot()["modules"]["main"] == {"calls": 1}
 
 
 def test_execute_only_model_package_receives_runtime_initial_inputs(tmp_path: Path):
@@ -406,13 +434,13 @@ class ExecuteInputModel(BioModule):
         encoding="utf-8",
     )
 
-    package_path = build_package(
+    package_path = _build_component_lab(
         model_dir, package_name="local/execute-input-model", version="1.0.0"
     )
     result = run_package(package_path, install_deps=False)
 
-    assert result["outputs"] == ["value"]
-    assert result["state"] == {"latest": 8.0}
+    assert "value" in result["outputs"]["main"]
+    assert result["outputs"]["main"]["value"]["value"] == 8.0
 
 
 def test_model_package_run_coerces_runtime_initial_inputs(tmp_path: Path):
@@ -472,12 +500,14 @@ class InputModel(BioModule):
         encoding="utf-8",
     )
 
-    package_path = build_package(
+    package_path = _build_component_lab(
         model_dir, package_name="local/input-model", version="1.0.0"
     )
     result = run_package(package_path, install_deps=False)
 
-    assert result["state"] == {"value": 4.0, "received_signal_type": "ScalarSignal"}
+    prepared = prepare_lab_package(package_path, install_deps=False)
+    prepared.world.run(duration=prepared.duration)
+    assert prepared.world.snapshot()["modules"]["main"] == {"value": 4.0, "received_signal_type": "ScalarSignal"}
 
 
 def test_lab_build_embeds_models_and_runs_without_registry(tmp_path: Path):
@@ -764,7 +794,7 @@ def test_build_rejects_legacy_source_provenance(tmp_path: Path):
     )
 
     with pytest.raises(PackageError, match="must not include legacy source keys"):
-        build_package(
+        _build_component_lab(
             model_dir,
             package_name="local/counter",
             version="1.0.0",
@@ -1110,7 +1140,7 @@ def test_build_rejects_missing_source_and_non_directory_tree(tmp_path: Path) -> 
     _write_counter_model(model_dir)
     (model_dir / "data").write_text("not a directory", encoding="utf-8")
 
-    with pytest.raises(PackageError, match="Expected directory"):
+    with pytest.raises(PackageError, match="require lab.yaml"):
         build_package(model_dir)
 
 
@@ -1173,22 +1203,22 @@ def test_package_private_helpers_cover_source_and_alias_edges(tmp_path: Path) ->
 
 def test_validate_package_reports_archive_structure_errors(tmp_path: Path) -> None:
     assert not validate_package(tmp_path / "not-a-package.txt").valid
-    missing = validate_package(tmp_path / "missing.bsimodel")
+    missing = validate_package(tmp_path / "missing.bsilab")
     assert missing.errors and "not found" in missing.errors[0]
 
-    no_manifest = tmp_path / "no-manifest.bsimodel"
+    no_manifest = tmp_path / "no-manifest.bsilab"
     with ZipFile(no_manifest, "w") as zipf:
         zipf.writestr("payload/model.yaml", "biosim: {}\n")
     assert "missing package.yaml" in validate_package(no_manifest).errors[0]
 
-    bad_path = tmp_path / "bad-path.bsimodel"
+    bad_path = tmp_path / "bad-path.bsilab"
     with ZipFile(bad_path, "w") as zipf:
         zipf.writestr("../evil", "bad")
         zipf.writestr("package.yaml", "package_type: model\n")
         zipf.writestr("integrity/sha256sums.txt", "")
     assert "Invalid archive path" in validate_package(bad_path).errors[0]
 
-    bad_checksum = tmp_path / "bad-checksum.bsimodel"
+    bad_checksum = tmp_path / "bad-checksum.bsilab"
     with ZipFile(bad_checksum, "w") as zipf:
         zipf.writestr(
             "package.yaml",
@@ -1207,7 +1237,7 @@ sha256: bad
 
 def test_publish_fetch_and_prepare_error_paths(tmp_path: Path, monkeypatch) -> None:
     model_dir = _write_counter_model(tmp_path / "counter")
-    package_path = build_package(
+    package_path = _build_component_lab(
         model_dir, package_name="demo/counter", version="1.0.0"
     )
 
@@ -1238,8 +1268,7 @@ def test_publish_fetch_and_prepare_error_paths(tmp_path: Path, monkeypatch) -> N
             registry_dir=tmp_path / "registry",
             cache_dir=tmp_path / "other-cache",
         )
-    with pytest.raises(PackageError, match="Expected a lab package"):
-        prepare_lab_package(package_path, install_deps=False)
+    assert prepare_lab_package(package_path, install_deps=False).world is not None
 
 
 def test_install_declared_dependencies_validation_and_command(monkeypatch) -> None:
@@ -1757,3 +1786,15 @@ def test_install_declared_dependencies_exposes_installed_console_scripts(
         scripts_dir,
         "/usr/bin",
     ]
+
+
+def test_standalone_model_source_is_rejected(tmp_path):
+    model = _write_counter_model(tmp_path / "standalone")
+    with pytest.raises(PackageError, match="require lab.yaml"):
+        build_package(model)
+
+
+def test_standalone_model_extension_is_rejected(tmp_path):
+    archive = tmp_path / "old.bsimodel"
+    archive.write_bytes(b"not-a-lab")
+    assert not validate_package(archive).valid

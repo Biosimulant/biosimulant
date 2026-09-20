@@ -961,7 +961,7 @@ def _main_packages(argv: list[str], *, prog: str = "biosimulant packages") -> No
     build_parser.add_argument("--out", type=Path, default=Path("dist/biosimulant-packages"))
     build_parser.add_argument("--json", action="store_true", dest="json_output")
 
-    run_parser = subparsers.add_parser("run", help="Run a local .bsimodel or .bsilab package")
+    run_parser = subparsers.add_parser("run", help="Run a local .bsilab package")
     run_parser.add_argument("package_file", type=Path)
     run_parser.add_argument("--no-install-deps", action="store_true")
     run_parser.add_argument("--dependency-root", type=Path, default=None)

@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.36] - 2026-09-20
+
+- Labs are the only publishable and executable package resource. Standalone model packages and `.bsimodel` files are rejected; model components remain supported inside labs.
+
 ## [0.0.35] - 2026-09-18
 
 ### Added

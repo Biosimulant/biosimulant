@@ -48,8 +48,8 @@ from .wiring import WiringBuilder
 from .world import BioWorld
 
 PACKAGE_EXTENSION = ".bsimpkg"
-PACKAGE_EXTENSIONS = (".bsimpkg", ".bsimodel", ".bsilab")
-_TYPE_EXTENSION = {"model": ".bsimodel", "lab": ".bsilab"}
+PACKAGE_EXTENSIONS = (".bsimpkg", ".bsilab")
+_TYPE_EXTENSION = {"lab": ".bsilab"}
 PACKAGE_SCHEMA_VERSION = "1.0"
 DEFAULT_PACKAGE_VERSION = "0.1.0"
 DEFAULT_PACKAGE_NAMESPACE = "local"
@@ -394,19 +394,6 @@ def _manifest_declared_version(manifest: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _collect_model_entries(source_dir: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
-    manifest_path = source_dir / "model.yaml"
-    if not manifest_path.exists():
-        raise PackageError(f"Model package source is missing {manifest_path}")
-    manifest, manifest_bytes = _normalized_manifest_bytes(manifest_path)
-    _validate_model_manifest(manifest)
-    _validate_dependencies(manifest)
-
-    entries: dict[str, bytes] = {"payload/model.yaml": manifest_bytes}
-    for name in ("src", "artifacts", "data", "tests"):
-        entries.update(_collect_tree(source_dir, name))
-    entries.update(_collect_glob_files(source_dir, ("README*", "*.md")))
-    return manifest, entries
 
 
 def _collect_lab_entries(source_dir: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
@@ -534,18 +521,6 @@ def _build_package_yaml(
             provenance[key] = value
     if provenance:
         package_yaml["provenance"] = provenance
-    if package_type == "model":
-        runtime = (
-            manifest.get("runtime")
-            if isinstance(manifest.get("runtime"), Mapping)
-            else {}
-        )
-        package_yaml["runtime"] = (
-            {"dependencies": dict(runtime.get("dependencies") or {})}
-            if isinstance(runtime, Mapping)
-            else {"dependencies": {}}
-        )
-        package_yaml["manifest_fingerprint"] = _manifest_fingerprint(manifest)
     return package_yaml
 
 
@@ -574,55 +549,18 @@ def build_package(
     if not source_path.is_dir():
         raise PackageError(f"Package source must be a directory: {source_path}")
 
-    if (source_path / "model.yaml").exists():
-        package_type = "model"
-        manifest, entries = _collect_model_entries(source_path)
-    elif (source_path / "lab.yaml").exists():
-        return export_lab_package(
-            source_path,
-            output_path=output_path,
-            package_name=package_name,
-            version=version,
-            visibility=visibility,
-            source=source,
-            vendor_dependencies=vendor_dependencies,
-            registry_url=registry_url,
-        )
-    else:
-        raise PackageError(f"Could not find model.yaml or lab.yaml in {source_path}")
-
-    package_name = (
-        package_name
-        or _manifest_declared_package(manifest)
-        or _default_package_name(source_path)
-    )
-    version = _validate_version(
-        version
-        if version is not None
-        else (_manifest_declared_version(manifest) or DEFAULT_PACKAGE_VERSION)
-    )
-
-    logical_sha256 = _logical_hash(entries)
-    package_yaml = _build_package_yaml(
-        package_type=package_type,
+    if not (source_path / "lab.yaml").exists():
+        raise PackageError(f"Lab packages require lab.yaml in {source_path}; embed model.yaml components inside a lab")
+    return export_lab_package(
+        source_path,
+        output_path=output_path,
         package_name=package_name,
         version=version,
         visibility=visibility,
-        manifest=manifest,
-        entry_manifest=f"payload/{package_type}.yaml",
         source=source,
-        logical_sha256=logical_sha256,
+        vendor_dependencies=vendor_dependencies,
+        registry_url=registry_url,
     )
-    entries["package.yaml"] = _safe_yaml_dump(package_yaml)
-    entries["integrity/sha256sums.txt"] = _checksums_text(entries).encode("utf-8")
-
-    if output_path is None:
-        ext = _TYPE_EXTENSION.get(package_type, PACKAGE_EXTENSION)
-        file_name = f"{_package_slug(package_name)}-{version}{ext}"
-        output_path = source_path / "dist" / file_name
-    target = Path(output_path).expanduser().resolve()
-    _write_zip(target, entries)
-    return target
 
 
 def export_lab_package(
@@ -789,10 +727,7 @@ def validate_package(path: str | Path) -> PackageValidationResult:
 
             manifest = _safe_yaml_load(entries[entry_manifest])
             package_type = package_yaml.get("package_type")
-            if package_type == "model":
-                _validate_model_manifest(manifest)
-                _validate_dependencies(manifest)
-            elif package_type == "lab":
+            if package_type == "lab":
                 _validate_lab_manifest(manifest)
                 _validate_lab_lock_for_archive(manifest, entries, entry_manifest)
                 _validate_embedded_lab_package(entries, manifest, entry_manifest)
@@ -1197,45 +1132,6 @@ def _bind_compatibility_ports(module: BioModule, manifest: Mapping[str, Any]) ->
             raise PackageError(f"model.yaml doesn't match the Python module: {exc}") from exc
 
 
-def _instantiate_model_from_package(
-    loaded: _LoadedPackage, parameters: Mapping[str, Any] | None = None
-) -> tuple[BioModule, dict[str, Any]]:
-    manifest = loaded.manifest
-    bsim_block = (
-        manifest.get("biosim") if isinstance(manifest.get("biosim"), Mapping) else {}
-    )
-    entrypoint = bsim_block.get("entrypoint")
-    if not isinstance(entrypoint, str):
-        raise PackageError("Model manifest is missing biosim.entrypoint")
-
-    init_kwargs = {}
-    if isinstance(bsim_block.get("init_kwargs"), Mapping):
-        init_kwargs.update(dict(bsim_block.get("init_kwargs") or {}))
-    if parameters:
-        init_kwargs.update(dict(parameters))
-    init_kwargs.update(_remote_execution_init_kwargs(manifest))
-
-    original_sys_path = list(sys.path)
-    try:
-        for item in reversed(_module_paths_for_payload(loaded.payload_root)):
-            if item not in sys.path:
-                sys.path.insert(0, item)
-        factory = _load_entrypoint(entrypoint, model_path=loaded.payload_root)
-        module = factory(**init_kwargs)
-    finally:
-        sys.path[:] = original_sys_path
-    if not isinstance(module, BioModule):
-        raise PackageError(f"Entrypoint {entrypoint} did not construct a BioModule")
-    _bind_execution_policy(module, manifest)
-    _bind_compatibility_ports(module, manifest)
-    return module, {
-        "communication_step": bsim_block.get("communication_step"),
-        "setup": (
-            dict(bsim_block.get("setup") or {})
-            if isinstance(bsim_block.get("setup"), Mapping)
-            else {}
-        ),
-    }
 
 
 def _loaded_package_from_path(
@@ -1497,56 +1393,6 @@ def _declared_input_specs(module: BioModule) -> Mapping[str, Any]:
     return declared if isinstance(declared, dict) else {}
 
 
-def _run_model_loaded_package(
-    loaded: _LoadedPackage,
-    *,
-    install_deps: bool = True,
-    dependency_logger: DependencyLogger | None = None,
-    dependency_process_tracker: ProcessTracker | None = None,
-    cancel_checker: CancelChecker | None = None,
-) -> dict[str, Any]:
-    if install_deps:
-        _install_declared_dependencies(
-            loaded.manifest,
-            dependency_logger=dependency_logger,
-            process_tracker=dependency_process_tracker,
-            cancel_checker=cancel_checker,
-        )
-    module, meta = _instantiate_model_from_package(loaded)
-    runtime = (
-        loaded.manifest.get("runtime")
-        if isinstance(loaded.manifest.get("runtime"), Mapping)
-        else {}
-    )
-    communication_step = extract_communication_step(
-        None, runtime, fallback=meta["communication_step"], error_cls=PackageError
-    )
-    world = BioWorld(communication_step=communication_step)
-    world.add_biomodule("model", module)
-    world.setup({"model": meta["setup"]})
-    initial_inputs = (
-        runtime.get("initial_inputs")
-        if isinstance(runtime.get("initial_inputs"), Mapping)
-        else {}
-    )
-    if initial_inputs:
-        module.set_inputs(
-            coerce_typed_inputs(
-                initial_inputs,
-                _declared_input_specs(module),
-                source="run",
-                time_value=0.0,
-                error_cls=PackageError,
-            )
-        )
-    world.run(communication_step)
-    outputs = world.get_outputs("model")
-    return {
-        "package": loaded.package_yaml["package"],
-        "version": loaded.package_yaml["version"],
-        "outputs": sorted(outputs.keys()),
-        "state": module.snapshot(),
-    }
 
 
 def _flatten_embedded_lab_dir(
@@ -2157,14 +2003,6 @@ def run_package(
         Path(path).expanduser().resolve(),
         unpack_root=Path(unpack_root).expanduser().resolve(),
     )
-    if loaded.package_type == "model":
-        return _run_model_loaded_package(
-            loaded,
-            install_deps=install_deps,
-            dependency_logger=dependency_logger,
-            dependency_process_tracker=dependency_process_tracker,
-            cancel_checker=cancel_checker,
-        )
     if loaded.package_type == "lab":
         return _run_lab_loaded_package(
             loaded,

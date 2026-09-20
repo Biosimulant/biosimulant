@@ -19,8 +19,8 @@ _SEMVER_RE = re.compile(
 )
 _VALID_PACKAGE_SEGMENT_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 _VALID_VISIBILITIES = {"private", "public"}
-_TYPE_EXTENSION = {"model": ".bsimodel", "lab": ".bsilab"}
-_TYPE_MANIFEST = {"model": "model.yaml", "lab": "lab.yaml"}
+_TYPE_EXTENSION = {"lab": ".bsilab"}
+_TYPE_MANIFEST = {"lab": "lab.yaml"}
 
 
 @dataclass(frozen=True)

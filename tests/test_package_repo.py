@@ -6,7 +6,7 @@ import pytest
 
 from biosim.pack import PackageError
 from biosim.package_repo import load_package_repo_manifest
-from tests.test_pack import _write_counter_model
+from tests.test_pack import _write_counter_model, _component_lab
 
 
 def _write_manifest(tmp_path: Path, text: str) -> Path:
@@ -29,19 +29,19 @@ def test_package_repo_rejects_missing_manifest(tmp_path: Path) -> None:
         ("schema_version: 1\npackages: []", "at least one package"),
         ("schema_version: 1\npackages:\n  - bad", "entry #1 must be a mapping"),
         (
-            "schema_version: 1\npackages:\n  - package: Demo/Bad\n    version: 1.0.0\n    type: model\n    path: model",
+            "schema_version: 1\npackages:\n  - package: Demo/Bad\n    version: 1.0.0\n    type: lab\n    path: model-lab",
             "Package names",
         ),
         (
-            "schema_version: 1\npackages:\n  - package: demo/pkg\n    version: latest\n    type: model\n    path: model",
+            "schema_version: 1\npackages:\n  - package: demo/pkg\n    version: latest\n    type: lab\n    path: model-lab",
             "Invalid SemVer",
         ),
         (
-            "schema_version: 1\npackages:\n  - package: demo/pkg\n    version: 1.0.0\n    type: space\n    path: model",
+            "schema_version: 1\npackages:\n  - package: demo/pkg\n    version: 1.0.0\n    type: space\n    path: model-lab",
             "type must be one of",
         ),
         (
-            "schema_version: 1\npackages:\n  - package: demo/pkg\n    version: 1.0.0\n    type: model\n    path: missing",
+            "schema_version: 1\npackages:\n  - package: demo/pkg\n    version: 1.0.0\n    type: lab\n    path: missing",
             "source path is missing",
         ),
     ],
@@ -60,8 +60,8 @@ schema_version: 1
 packages:
   - package: demo/pkg
     version: 1.0.0
-    type: model
-    path: model
+    type: lab
+    path: model-lab
 """,
     )
 
@@ -70,7 +70,7 @@ packages:
 
 
 def test_package_repo_rejects_duplicate_ids_and_package_versions(tmp_path: Path) -> None:
-    _write_counter_model(tmp_path / "model")
+    _component_lab(_write_counter_model(tmp_path / "model"))
     duplicate_ids = _write_manifest(
         tmp_path,
         """
@@ -79,13 +79,13 @@ packages:
   - id: pkg
     package: demo/pkg-a
     version: 1.0.0
-    type: model
-    path: model
+    type: lab
+    path: model-lab
   - id: pkg
     package: demo/pkg-b
     version: 1.0.0
-    type: model
-    path: model
+    type: lab
+    path: model-lab
 """,
     )
     with pytest.raises(PackageError, match="Duplicate package id"):
@@ -98,12 +98,12 @@ schema_version: 1
 packages:
   - package: demo/pkg
     version: 1.0.0
-    type: model
-    path: model
+    type: lab
+    path: model-lab
   - package: demo/pkg
     version: 1.0.0
-    type: model
-    path: model
+    type: lab
+    path: model-lab
 """,
     )
     with pytest.raises(PackageError, match="Duplicate package entry"):
@@ -111,7 +111,7 @@ packages:
 
 
 def test_package_repo_rejects_bad_source_metadata_and_publish_type(tmp_path: Path) -> None:
-    _write_counter_model(tmp_path / "model")
+    _component_lab(_write_counter_model(tmp_path / "model"))
     bad_source = _write_manifest(
         tmp_path,
         """
@@ -119,8 +119,8 @@ schema_version: 1
 packages:
   - package: demo/pkg
     version: 1.0.0
-    type: model
-    path: model
+    type: lab
+    path: model-lab
     source: bad
 """,
     )
@@ -134,8 +134,8 @@ schema_version: 1
 packages:
   - package: demo/pkg
     version: 1.0.0
-    type: model
-    path: model
+    type: lab
+    path: model-lab
     publish: maybe
 """,
     )
