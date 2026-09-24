@@ -69,7 +69,7 @@ For a durable handle that returns immediately, use
 `client.runs.create(...).wait()`. See the
 [Developer API documentation](https://docs.biosimulant.com/developer-api) for
 async execution, cancellation, timeout recovery, webhooks, and billing.
-The [supported Python API surface](https://docs.biosimulant.com/references/library/python-api)
+The [supported Python API surface](https://docs.biosimulant.com/runtime/python-api)
 lists every supported root import, including `Client`, `AsyncClient`, result
 types, and public errors.
 
@@ -168,7 +168,7 @@ Lab. Dependencies resolve into `./lab/.biosimulant/dependencies/`; delete that
 directory to force a clean, lockfile-verified resolution. See
 [`docs/hub-composition.md`](docs/hub-composition.md) for the lockfile format,
 vendored archival packages, and read-only archive state overrides.
-The hosted [HubComposition API reference](https://docs.biosimulant.com/references/library/hub-composition-api)
+The hosted [HubComposition API reference](https://docs.biosimulant.com/runtime/hub-composition-api)
 documents its constructor, `.add()`, `.connect()`, `.apply()`, and `.setup()` methods.
 
 ## Packaging Models And Labs
