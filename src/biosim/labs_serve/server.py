@@ -36,6 +36,7 @@ from biosim.pack import (
     inspect_lab_execution,
     prepare_lab_package,
 )
+from biosim.results import strict_results
 from biosim.run_overrides import (
     apply_run_overrides as _apply_run_overrides,
     map_initial_inputs,
@@ -1560,15 +1561,17 @@ class LabServeSession:
                         for module_name in world.module_names
                         if world.get_outputs(module_name)
                     }
-                    result = {
-                        "visuals": visuals,
-                        "outputs": outputs,
-                        "duration": prepared.duration,
-                        "communication_step": prepared.communication_step,
-                        "settle_steps": prepared.settle_steps,
-                        "modules": prepared.modules,
-                        "compatibility": world.compatibility.to_dict(),
-                    }
+                    result = strict_results(
+                        {
+                            "visuals": visuals,
+                            "outputs": outputs,
+                            "duration": prepared.duration,
+                            "communication_step": prepared.communication_step,
+                            "settle_steps": prepared.settle_steps,
+                            "modules": prepared.modules,
+                            "compatibility": world.compatibility.to_dict(),
+                        }
+                    )
                     durable_artifacts = self._run_store.persist_artifacts(
                         run.id,
                         artifacts,
