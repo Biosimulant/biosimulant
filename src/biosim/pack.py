@@ -32,6 +32,7 @@ from .execution import (
     unknown_lab_execution,
 )
 from .modules import BioModule
+from .results import strict_results
 from .runtime import (
     LabTree,
     LabTreeChild,
@@ -1748,18 +1749,20 @@ def _run_lab_loaded_package(
         for module_name in world.module_names
         if world.get_outputs(module_name)
     }
-    return {
-        "package": prepared.package,
-        "version": prepared.version,
-        "duration": duration,
-        "communication_step": prepared.communication_step,
-        "settle_steps": settle_steps,
-        "execution": describe_lab_execution(world.execution_policies).to_dict(),
-        "modules": prepared.modules,
-        "outputs": outputs,
-        "visuals": world.collect_visuals(),
-        "compatibility": world.compatibility.to_dict(),
-    }
+    return strict_results(
+        {
+            "package": prepared.package,
+            "version": prepared.version,
+            "duration": duration,
+            "communication_step": prepared.communication_step,
+            "settle_steps": settle_steps,
+            "execution": describe_lab_execution(world.execution_policies).to_dict(),
+            "modules": prepared.modules,
+            "outputs": outputs,
+            "visuals": world.collect_visuals(),
+            "compatibility": world.compatibility.to_dict(),
+        }
+    )
 
 
 def _scoped_ref(prefix: str, ref: str) -> str:

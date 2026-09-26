@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- Run results are strict JSON. `labs run` (including `--results-file`,
+  `--report-file` and `--json`) and `labs serve` replace NaN and ±Infinity
+  with `null` and list each replacement under `non_finite_values`, so one
+  diverging output no longer makes the whole results file unreadable by
+  browsers, PostgreSQL or `jq`.
+
 ## [0.0.36] - 2026-09-20
 
 - Labs are the only publishable and executable package resource. Standalone model packages and `.bsimodel` files are rejected; model components remain supported inside labs.
