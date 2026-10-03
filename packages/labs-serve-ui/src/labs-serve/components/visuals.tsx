@@ -19,11 +19,16 @@ function visualTitle(visual: RunVisualSpec): string {
   return typeof title === "string" && title.trim() ? title : visual.render;
 }
 
-export function VisualsPanel({ visuals }: { visuals: RunModuleVisuals[] }) {
+export function VisualsPanel({ visuals, delivery }: { visuals: RunModuleVisuals[]; delivery?: unknown }) {
   const [expanded, setExpanded] = React.useState<{ title: string; visual: RunVisualSpec } | null>(null);
-  if (!visuals.length) return <div className="empty-card">Run visuals will appear here after results are available.</div>;
+  const report = isRecord(delivery) ? delivery : null;
+  const notice = report && (report.status === "failed" || (Array.isArray(report.diagnostics) && report.diagnostics.length > 0))
+    ? <p role="status">Some visualizations are missing or invalid. Review the results JSON diagnostics before using or publishing these results.</p>
+    : null;
+  if (!visuals.length) return <>{notice}<div className="empty-card">Run visuals will appear here after results are available.</div></>;
   return (
     <>
+      {notice}
       <div className="visual-stack">
         {visuals.map((module) => (
           <section key={module.module} className="visual-module">
@@ -128,14 +133,18 @@ function TableVisual({ data }: { data: Record<string, unknown> }) {
 }
 
 function ImageVisual({ data }: { data: Record<string, unknown> }) {
+  const source = isRecord(data.source) ? data.source : {};
   const src =
-    typeof data.url === "string" ? data.url : typeof data.src === "string" ? data.src : undefined;
+    typeof source.url === "string" ? source.url : typeof data.url === "string" ? data.url : typeof data.src === "string" ? data.src : undefined;
   if (!src) return <pre className="json-block compact">{compactJson(data)}</pre>;
-  return <img className="image-visual" src={src} alt={typeof data.alt === "string" ? data.alt : "visual"} />;
+  return <figure>
+    <img className="image-visual" src={src} alt={typeof data.alt === "string" ? data.alt : "visual"} />
+    {typeof data.caption === "string" ? <figcaption>{data.caption}</figcaption> : null}
+  </figure>;
 }
 
 function TextVisual({ data }: { data: Record<string, unknown> }) {
-  const text = typeof data.text === "string" ? data.text : typeof data.value === "string" ? data.value : compactJson(data);
+  const text = typeof data.text === "string" ? data.text : typeof data.markdown === "string" ? data.markdown : typeof data.value === "string" ? data.value : compactJson(data);
   return <div className="text-visual">{text}</div>;
 }
 
@@ -178,6 +187,12 @@ function ticks(min: number, max: number, count: number): number[] {
   return Array.from({ length: count + 1 }, (_, index) => min + ((max - min) * index) / count);
 }
 
+function axisTitle(data: Record<string, unknown>, axis: "x" | "y") {
+  const label = data[`${axis}_label`] ?? data[`${axis}label`];
+  const unit = data[`${axis}_unit`];
+  return [typeof label === "string" ? label : "", typeof unit === "string" && unit ? `(${unit})` : ""].filter(Boolean).join(" ");
+}
+
 function SeriesVisual({ data, expanded }: { data: Record<string, unknown>; expanded: boolean }) {
   const series = getSeries(data);
   if (!series.length) return <pre className="json-block compact">{compactJson(data)}</pre>;
@@ -195,7 +210,7 @@ function SeriesVisual({ data, expanded }: { data: Record<string, unknown>; expan
   const marginLeft = 44;
   const marginRight = 12;
   const marginTop = 10;
-  const marginBottom = 22;
+  const marginBottom = axisTitle(data, "x") ? 40 : 22;
   const plotW = width - marginLeft - marginRight;
   const plotH = height - marginTop - marginBottom;
   const xSpan = Math.max(1e-9, maxX - minX);
@@ -227,6 +242,8 @@ function SeriesVisual({ data, expanded }: { data: Record<string, unknown>; expan
       {/* axes */}
       <line className="axis-line" x1={marginLeft} y1={marginTop} x2={marginLeft} y2={height - marginBottom} />
       <line className="axis-line" x1={marginLeft} y1={height - marginBottom} x2={width - marginRight} y2={height - marginBottom} />
+      {axisTitle(data, "x") ? <text className="axis-label" x={width / 2} y={height - 2} textAnchor="middle">{axisTitle(data, "x")}</text> : null}
+      {axisTitle(data, "y") ? <text className="axis-label" transform={`translate(10 ${height / 2}) rotate(-90)`} textAnchor="middle">{axisTitle(data, "y")}</text> : null}
       {/* data series */}
       {series.map((entry, index) => (
         <polyline
@@ -246,19 +263,19 @@ function SeriesVisual({ data, expanded }: { data: Record<string, unknown>; expan
 function BarVisual({ data }: { data: Record<string, unknown> }) {
   const items = Array.isArray(data.items) ? data.items : Array.isArray(data.bars) ? data.bars : [];
   const parsed = items.flatMap((item) =>
-    isRecord(item) ? [{ label: String(item.label ?? ""), value: Number(item.value ?? 0) }] : [],
+    isRecord(item) ? [{ label: String(item.label ?? ""), value: Number(item.value ?? 0), unit: typeof item.unit === "string" ? item.unit : "" }] : [],
   );
-  const max = Math.max(1, ...parsed.map((item) => item.value));
+  const max = Math.max(1, ...parsed.map((item) => Math.abs(item.value)));
   if (!parsed.length) return <pre className="json-block compact">{compactJson(data)}</pre>;
   return (
     <div className="bar-list">
       {parsed.map((item) => (
         <div key={item.label} className="bar-row">
           <span>{item.label}</span>
-          <div>
-            <i style={{ width: `${(item.value / max) * 100}%` }} />
+          <div style={{ position: "relative" }}>
+            <i style={{ position: "absolute", left: `${item.value < 0 ? 50 - Math.abs(item.value) / max * 50 : 50}%`, width: `${Math.abs(item.value) / max * 50}%` }} />
           </div>
-          <b>{item.value}</b>
+          <b>{item.value} {item.unit}</b>
         </div>
       ))}
     </div>
@@ -279,7 +296,9 @@ function ScatterVisual({ data }: { data: Record<string, unknown> }) {
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
   return (
-    <svg className="chart" viewBox="0 0 360 180">
+    <svg className="chart" viewBox="0 0 360 205" role="img" aria-label="Scatter plot">
+      <text className="axis-label" x="180" y="199" textAnchor="middle">{axisTitle(data, "x")}</text>
+      <text className="axis-label" transform="translate(10 90) rotate(-90)" textAnchor="middle">{axisTitle(data, "y")}</text>
       {points.map((point, index) => (
         <circle
           key={index}
@@ -293,32 +312,42 @@ function ScatterVisual({ data }: { data: Record<string, unknown> }) {
 }
 
 function HeatmapVisual({ data }: { data: Record<string, unknown> }) {
-  const matrix = Array.isArray(data.matrix) ? data.matrix : [];
-  if (!matrix.length) return <pre className="json-block compact">{compactJson(data)}</pre>;
-  return (
-    <div className="heatmap">
-      {matrix.map((row, rowIndex) =>
-        Array.isArray(row)
-          ? row.map((value, columnIndex) => (
-              <span
-                key={`${rowIndex}-${columnIndex}`}
-                style={{ opacity: Math.max(0.2, Math.min(1, Number(value) || 0)) }}
-              />
-            ))
-          : null,
-      )}
-    </div>
-  );
+  const matrix = Array.isArray(data.values) ? data.values : Array.isArray(data.matrix) ? data.matrix : [];
+  const rows = matrix.filter(Array.isArray) as number[][];
+  if (!rows.length || !rows[0]?.length) return <pre className="json-block compact">{compactJson(data)}</pre>;
+  const values = rows.flat().map(Number).filter(Number.isFinite);
+  const min = Math.min(...values), max = Math.max(...values);
+  const xLabels = Array.isArray(data.x_labels) ? data.x_labels : [];
+  const yLabels = Array.isArray(data.y_labels) ? data.y_labels : [];
+  const unit = typeof data.unit === "string" ? data.unit : "";
+  return <div className="heatmap" style={{ display: "block", overflow: "auto" }}>
+    <table aria-label={typeof data.title === "string" ? data.title : "Heatmap"}>
+      <thead><tr><th>{unit}</th>{rows[0].map((_, col) => <th key={col}>{String(xLabels[col] ?? col + 1)}</th>)}</tr></thead>
+      <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>
+        <th>{String(yLabels[rowIndex] ?? rowIndex + 1)}</th>
+        {row.map((raw, col) => { const value = Number(raw); const ratio = max === min ? .5 : (value - min) / (max - min); return <td key={col} title={`${value} ${unit}`} style={{ padding: "8px 12px", background: `hsl(${220 - ratio * 220}, 72%, ${94 - ratio * 48}%)`, color: ratio > .65 ? "white" : "#172033" }}>{formatTick(value)}</td>; })}
+      </tr>)}</tbody>
+    </table>
+  </div>;
 }
 
 function GraphVisual({ data }: { data: Record<string, unknown> }) {
-  const nodes = Array.isArray(data.nodes) ? data.nodes : [];
-  const edges = Array.isArray(data.edges) ? data.edges : [];
-  return (
-    <div className="graph-summary">
-      <GitBranchIcon size={14} /> {nodes.length} nodes / {edges.length} edges
-    </div>
-  );
+  const nodes = (Array.isArray(data.nodes) ? data.nodes : []).filter(isRecord);
+  const edges = (Array.isArray(data.edges) ? data.edges : []).filter(isRecord);
+  const positions = new Map(nodes.map((node, index) => {
+    const angle = 2 * Math.PI * index / Math.max(1, nodes.length);
+    return [String(node.id), { x: 260 + 150 * Math.cos(angle), y: 140 + 90 * Math.sin(angle) }] as const;
+  }));
+  return <div className="graph-visual">
+    <div className="graph-summary"><GitBranchIcon size={14} /> {nodes.length} nodes / {edges.length} edges</div>
+    <svg className="chart" viewBox="0 0 520 280" role="img" aria-label={typeof data.title === "string" ? data.title : "Network"}>
+      {edges.map((edge, index) => { const from = positions.get(String(edge.source)); const to = positions.get(String(edge.target)); return from && to ? <line key={index} x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="currentColor" opacity=".5"><title>{String(edge.source)} → {String(edge.target)}</title></line> : null; })}
+      {nodes.map((node) => { const position = positions.get(String(node.id))!; return <g key={String(node.id)}>
+        <circle cx={position.x} cy={position.y} r="10" fill="#0f766e" />
+        <text x={position.x} y={position.y + 25} textAnchor="middle" fill="currentColor" fontSize="11">{String(node.label ?? node.id)}</text>
+      </g>; })}
+    </svg>
+  </div>;
 }
 
 type StructureFormat = "pdb" | "mmcif";

@@ -78,7 +78,7 @@ it("dispatches every supported non-structure renderer", async () => {
     ],
     [
       { render: "heatmap", data: { matrix: [[0.2, 0.8], [0.4, 1]] } },
-      (container) => expect(container.querySelector(".heatmap span")).not.toBeNull(),
+      (container) => expect(container.querySelector(".heatmap td")).not.toBeNull(),
     ],
     [
       { render: "graph", data: { nodes: [{ id: "a" }], edges: [{ source: "a", target: "b" }] } },
@@ -170,4 +170,32 @@ it("shows structure3d loading and viewer failure states", async () => {
   });
 
   expect(failed.textContent).toContain("Could not load structure: parse failed");
+});
+
+it("renders canonical heatmap values with labels, units and differing colours", async () => {
+  const container = await renderVisual({render: "heatmap", data: {values: [[1, 2]], x_labels: ["A", "B"], y_labels: ["Control"], unit: "CFU"}});
+  expect(container.textContent).toContain("CFU");
+  expect(container.textContent).toContain("Control");
+  const cells = container.querySelectorAll<HTMLTableCellElement>(".heatmap td");
+  expect(cells.length).toBe(2);
+  expect(cells[0].textContent).toBe("1");
+  expect(cells[0].style.background).not.toBe(cells[1].style.background);
+});
+it("draws graph nodes and edges rather than only a count", async () => {
+  const container = await renderVisual({render: "graph", data: {nodes: [{id: "A"}, {id: "B"}], edges: [{source: "A", target: "B"}]}});
+  expect(container.querySelectorAll("svg circle").length).toBe(2);
+  expect(container.querySelectorAll("svg line").length).toBe(1);
+});
+it("renders the documented axis units", async () => {
+  const container = await renderVisual({render: "timeseries", data: {series: [{name: "Population", points: [[0, 1], [1, 2]]}], x_label: "Time", x_unit: "h", y_label: "Population", y_unit: "CFU"}});
+  expect(container.textContent).toContain("Time (h)");
+  expect(container.textContent).toContain("Population (CFU)");
+});
+
+it("renders negative bars around zero and preserves quantity units", async () => {
+  const container = await renderVisual({render: "bar", data: {items: [{label: "Residual", value: -2, unit: "CFU"}]}});
+  expect(container.textContent).toContain("-2 CFU");
+  const bar = container.querySelector<HTMLElement>(".bar-row i")!;
+  expect(bar.style.width).toBe("50%");
+  expect(bar.style.left).toBe("0%");
 });

@@ -1,0 +1,224 @@
+{
+  "custom_renderers": "Unsupported unless a renderer is registered in every target client; v1 uses the nine portable kinds.",
+  "limits": {
+    "points": 10000,
+    "visual_bytes": 2000000,
+    "visuals": 64
+  },
+  "renderers": {
+    "bar": {
+      "clients": [
+        "local",
+        "web",
+        "desktop"
+      ],
+      "example": {
+        "data": {
+          "items": [
+            {
+              "label": "Control",
+              "unit": "CFU",
+              "value": 12
+            }
+          ]
+        },
+        "render": "bar",
+        "schema_version": "1"
+      },
+      "use_when": "Compare categories, endpoint counts or scenario summaries"
+    },
+    "graph": {
+      "clients": [
+        "local",
+        "web",
+        "desktop"
+      ],
+      "example": {
+        "data": {
+          "edges": [
+            {
+              "source": "A",
+              "target": "B"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "A"
+            },
+            {
+              "id": "B"
+            }
+          ]
+        },
+        "render": "graph",
+        "schema_version": "1"
+      },
+      "use_when": "Measured or modeled networks and dependencies"
+    },
+    "heatmap": {
+      "clients": [
+        "local",
+        "web",
+        "desktop"
+      ],
+      "example": {
+        "data": {
+          "unit": "CFU",
+          "values": [
+            [
+              1,
+              2
+            ]
+          ],
+          "x_labels": [
+            "A",
+            "B"
+          ],
+          "y_labels": [
+            "Control"
+          ]
+        },
+        "render": "heatmap",
+        "schema_version": "1"
+      },
+      "use_when": "Matrices, spatial fields, correlations or parameter sweeps"
+    },
+    "image": {
+      "clients": [
+        "local",
+        "web",
+        "desktop"
+      ],
+      "example": {
+        "data": {
+          "alt": "Detected colonies with numbered bounding boxes",
+          "caption": "Computed detections; inspect low-confidence regions.",
+          "source": {
+            "kind": "artifact",
+            "path": "outputs/annotated.png"
+          }
+        },
+        "render": "image",
+        "schema_version": "1"
+      },
+      "use_when": "Scientific images, annotations, segmentation masks and overlays"
+    },
+    "scatter": {
+      "clients": [
+        "local",
+        "web",
+        "desktop"
+      ],
+      "example": {
+        "data": {
+          "points": [
+            {
+              "label": "Plate 1",
+              "x": 12,
+              "y": 13
+            }
+          ],
+          "x_label": "Observed",
+          "x_unit": "CFU",
+          "y_label": "Predicted",
+          "y_unit": "CFU"
+        },
+        "render": "scatter",
+        "schema_version": "1"
+      },
+      "use_when": "Compare measurements, predictions, residuals or uncertainty"
+    },
+    "structure3d": {
+      "clients": [
+        "local",
+        "web",
+        "desktop"
+      ],
+      "example": {
+        "data": {
+          "format": "pdb",
+          "source": {
+            "kind": "artifact",
+            "path": "outputs/structure.pdb"
+          }
+        },
+        "render": "structure3d",
+        "schema_version": "1"
+      },
+      "use_when": "Molecular or structural coordinates (PDB/mmCIF common subset)"
+    },
+    "table": {
+      "clients": [
+        "local",
+        "web",
+        "desktop"
+      ],
+      "example": {
+        "data": {
+          "columns": [
+            "Plate",
+            "Count (CFU)"
+          ],
+          "rows": [
+            [
+              "A",
+              12
+            ]
+          ]
+        },
+        "render": "table",
+        "schema_version": "1"
+      },
+      "use_when": "Exact values and metadata; accompany a plot when one aids interpretation"
+    },
+    "text": {
+      "clients": [
+        "local",
+        "web",
+        "desktop"
+      ],
+      "example": {
+        "data": {
+          "text": "Interpret the computed result within its declared intended use."
+        },
+        "render": "text",
+        "schema_version": "1"
+      },
+      "use_when": "Interpretation, caveats, abstentions or a result with no numeric plot"
+    },
+    "timeseries": {
+      "clients": [
+        "local",
+        "web",
+        "desktop"
+      ],
+      "example": {
+        "data": {
+          "series": [
+            {
+              "name": "Population",
+              "points": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ]
+            }
+          ],
+          "x_label": "Time",
+          "x_unit": "h",
+          "y_label": "Population",
+          "y_unit": "CFU"
+        },
+        "render": "timeseries",
+        "schema_version": "1"
+      },
+      "use_when": "Changes over time; include time and quantity units"
+    }
+  },
+  "schema_version": "1"
+}

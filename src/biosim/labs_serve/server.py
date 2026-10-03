@@ -37,6 +37,7 @@ from biosim.pack import (
     prepare_lab_package,
 )
 from biosim.results import strict_results
+from biosim.visual_contract import audit_visualizations
 from biosim.run_overrides import (
     apply_run_overrides as _apply_run_overrides,
     map_initial_inputs,
@@ -573,7 +574,7 @@ def _sanitize_visuals(
                     next_data = dict(data)
                     next_visual["data"] = next_data
                     render = next_visual.get("render")
-                    if isinstance(render, str) and render.lower() == "structure3d":
+                    if isinstance(render, str) and render.lower() in {"structure3d", "image"}:
                         _rewrite_structure_artifact_source(
                             next_data,
                             run_id=run_id,
@@ -1564,6 +1565,7 @@ class LabServeSession:
                     result = strict_results(
                         {
                             "visuals": visuals,
+                            "visualization": audit_visualizations(visuals, getattr(prepared, "manifest", {}).get("visualization"), diagnostics=getattr(world, "visual_diagnostics", [])),
                             "outputs": outputs,
                             "duration": prepared.duration,
                             "communication_step": prepared.communication_step,

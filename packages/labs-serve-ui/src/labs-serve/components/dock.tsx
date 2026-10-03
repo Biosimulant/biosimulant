@@ -107,7 +107,7 @@ export function Dock(props: DockProps) {
           <>
             <KeyOutputs outputs={outputs} />
             <CompatibilitySummary record={compatibility} />
-            <VisualsPanel visuals={visuals} />
+            <VisualsPanel visuals={visuals} delivery={results?.visualization} />
           </>
         ) : null}
         {tab === "log" ? <LogsPanel logs={logs} /> : null}

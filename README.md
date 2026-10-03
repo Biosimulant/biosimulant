@@ -432,6 +432,7 @@ Maintainer flow for the bundled frontend:
   - `table`: `data = { "columns": [..], "rows": [[..], ...] }` or `data = { "items": [{...}, ...] }`
   - `image`: `data = { "src": str, "alt"?: str, "width"?: number, "height"?: number }`
   - `graph`: simple node-edge graph renderer
+  - `text`: interpretation, caveats and abstentions via `data = { "text": str }`
   - `structure3d`: `data = { "title"?: str, "source": { "kind": "url", "url": str } | { "kind": "artifact", "artifact_id": str }, "format": "mmcif" | "pdb", "annotations"?: [{ "label": str, "value": str|number|bool }], "initial_view"?: {...} }`
 - VisualSpec may also include an optional `description` (string) for hover text or captions.
 
@@ -460,3 +461,10 @@ STARTED -> TICK (xN) -> FINISHED
 ## License
 
 MIT. See `LICENSE.txt`.
+
+### Visualization delivery contract
+
+Almost every scientific Lab should include a useful visualization of computed results.
+Read [the nine-renderer contract and end-to-end authoring guide](docs/visualization.md).
+Use `visualization_catalog()` to inspect portable v1 examples and declare required views
+in `lab.yaml`; typed outputs remain authoritative.

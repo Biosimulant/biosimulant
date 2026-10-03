@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+
+from .visual_contract import validate_payload
 from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, Union
 
 
@@ -13,6 +15,7 @@ class VisualSpec(TypedDict, total=False):
     - data: JSON-serializable data payload interpreted by the client renderer for the given render type
     """
 
+    schema_version: str
     render: str
     data: Dict[str, Any]
     description: str
@@ -129,14 +132,18 @@ def validate_visual_spec(spec: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         return False, "'data' must be a dict"
     if "description" in spec and not isinstance(spec["description"], str):
         return False, "'description' must be a string"
-    # Check JSON serializability (best-effort)
+    if "schema_version" in spec:
+        error = validate_payload(spec)
+        if error:
+            return False, error
+    # Legacy specs retain their envelope compatibility.
     try:
         # Include optional fields that the UI may rely on.
         payload: Dict[str, Any] = {"render": render, "data": data}
         if "description" in spec:
             payload["description"] = spec["description"]
-        json.dumps(payload)
-    except TypeError as exc:
+        json.dumps(payload, allow_nan=False)
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
         return False, f"data not JSON-serializable: {exc}"
     return True, None
 
@@ -156,6 +163,8 @@ def normalize_visuals(visuals: Visuals) -> List[VisualSpec]:
         ok, _ = validate_visual_spec(v)
         if ok:
             normed: Dict[str, Any] = {"render": v["render"], "data": v["data"]}
+            if "schema_version" in v:
+                normed["schema_version"] = v["schema_version"]
             if "description" in v and isinstance(v["description"], str):
                 normed["description"] = v["description"]
             out.append(normed)  # type: ignore[arg-type]

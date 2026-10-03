@@ -24,7 +24,8 @@ from .signals import (
     validate_connection_specs,
     validate_port_spec_direction,
 )
-from .visuals import derive_timeseries_visuals, normalize_visuals
+from .visuals import derive_timeseries_visuals, normalize_visuals, validate_visual_spec
+from .visual_contract import validate_payload, MAX_VISUALS
 
 logger = logging.getLogger(__name__)
 
@@ -1003,19 +1004,40 @@ class BioWorld:
         return self._signal_store.get(name, {})
 
     def collect_visuals(self) -> List[Dict[str, Any]]:
+        """Collect visuals and retain bounded diagnostics in visual_diagnostics.
+
+        Scientific outputs survive renderer errors. Legacy envelopes remain
+        usable, while v1 payloads validate against the portable renderer contract.
+        """
         out: List[Dict[str, Any]] = []
+        self.visual_diagnostics: List[Dict[str, Any]] = []
+        total = 0
         for entry in self._modules.values():
-            module = entry.module
             try:
-                visuals = module.visualize()  # type: ignore[attr-defined]
-            except Exception:
-                logger.exception("BioModule.visualize raised for %s", module.__class__.__name__)
+                visuals = entry.module.visualize()
+            except Exception as exc:
+                logger.exception("BioModule.visualize raised for %s", entry.name)
+                self.visual_diagnostics.append({"module": entry.name, "code": "visualize_exception", "message": type(exc).__name__})
                 continue
             if not visuals:
-                visuals = derive_timeseries_visuals(
-                    self._signal_store.get(entry.name, {})
-                )
-            normalized = normalize_visuals(visuals)
+                visuals = derive_timeseries_visuals(self._signal_store.get(entry.name, {}))
+            items = visuals if isinstance(visuals, list) else [visuals]
+            normalized = []
+            for index, visual in enumerate(items[:MAX_VISUALS + 1]):
+                if visual is None:
+                    continue
+                ok, error = validate_visual_spec(visual)
+                payload_error = validate_payload(visual) if ok else error
+                if payload_error:
+                    self.visual_diagnostics.append({"module": entry.name, "index": index, "code": "invalid_visual", "message": payload_error})
+                if ok and total < MAX_VISUALS:
+                    normalized.extend(normalize_visuals(visual))
+                    total += 1
+                elif ok:
+                    self.visual_diagnostics.append({"module": entry.name, "code": "visual_limit", "message": "At most 64 visuals per Lab"})
+            if len(items) > MAX_VISUALS + 1:
+                self.visual_diagnostics.append({"module": entry.name, "code": "visual_limit", "message": "Module exceeds 64 visuals"})
             if normalized:
                 out.append({"module": entry.name, "visuals": normalized})
+        self.visual_diagnostics = self.visual_diagnostics[:MAX_VISUALS]
         return out

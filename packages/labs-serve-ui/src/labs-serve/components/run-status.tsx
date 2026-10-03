@@ -101,7 +101,7 @@ export function RunStatus({
         </button>
       </div>
       <div className="tab-body">
-        {tab === "visuals" ? <VisualsPanel visuals={visuals} /> : null}
+        {tab === "visuals" ? <VisualsPanel visuals={visuals} delivery={results?.visualization} /> : null}
         {tab === "logs" ? <LogsPanel logs={logs} /> : null}
         {tab === "json" ? <pre className="json-block">{compactJson({ run, results })}</pre> : null}
         {tab === "history" ? (

@@ -42,6 +42,7 @@ from .compatibility import (
     contract_digest,
 )
 from .visuals import VisualSpec, validate_visual_spec, normalize_visuals
+from .visual_contract import (VISUAL_CONTRACT_VERSION, SUPPORTED_RENDERERS, visualization_catalog, audit_visualizations, validate_requirements, visual_spec_schema)
 from .wiring import (
     WiringBuilder,
     build_from_spec,
@@ -79,6 +80,12 @@ __all__ = [
     "BioWorld",
     "WorldEvent",
     "VisualSpec",
+    "VISUAL_CONTRACT_VERSION",
+    "SUPPORTED_RENDERERS",
+    "visualization_catalog",
+    "visual_spec_schema",
+    "audit_visualizations",
+    "validate_requirements",
     "validate_visual_spec",
     "normalize_visuals",
     "BioModule",

@@ -33,6 +33,7 @@ from .execution import (
 )
 from .modules import BioModule
 from .results import strict_results
+from .visual_contract import audit_visualizations, validate_requirements
 from .runtime import (
     LabTree,
     LabTreeChild,
@@ -1749,6 +1750,10 @@ def _run_lab_loaded_package(
         for module_name in world.module_names
         if world.get_outputs(module_name)
     }
+    visuals = world.collect_visuals()
+    requirements = prepared.manifest.get("visualization")
+    if requirements is None and isinstance(prepared.manifest.get("raw"), Mapping):
+        requirements = prepared.manifest["raw"].get("visualization")
     return strict_results(
         {
             "package": prepared.package,
@@ -1759,7 +1764,8 @@ def _run_lab_loaded_package(
             "execution": describe_lab_execution(world.execution_policies).to_dict(),
             "modules": prepared.modules,
             "outputs": outputs,
-            "visuals": world.collect_visuals(),
+            "visuals": visuals,
+            "visualization": audit_visualizations(visuals, requirements, diagnostics=world.visual_diagnostics),
             "compatibility": world.compatibility.to_dict(),
         }
     )
@@ -2131,6 +2137,9 @@ def _validate_lab_lock_for_archive(
 
 
 def _validate_lab_manifest(manifest: Mapping[str, Any]) -> None:
+    errors = validate_requirements(manifest.get("visualization"))
+    if errors:
+        raise PackageError("; ".join(errors))
     models = manifest.get("models")
     children = manifest.get("children")
     has_children = isinstance(children, list) and len(children) > 0

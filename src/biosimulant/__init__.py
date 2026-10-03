@@ -49,6 +49,7 @@ _ALIASED_SUBMODULES = (
     "registry",
     "signals",
     "visuals",
+    "visual_contract",
     "wiring",
     "world",
 )

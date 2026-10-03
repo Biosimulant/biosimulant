@@ -52,6 +52,23 @@ def test_tools_list_covers_reading_editing_and_running(tmp_path: Path) -> None:
     assert {"lab_get", "lab_validate", "lab_set_parameters", "run_start", "registry_search"} <= names
 
 
+def test_local_agents_discover_all_visual_types_in_read_only_mode(tmp_path: Path) -> None:
+    from biosim.visual_contract import SUPPORTED_RENDERERS, visualization_catalog, visual_spec_schema
+
+    client, _ = _client(tmp_path, mcp_read_only=True)
+    initialized = _rpc(client, "initialize").json()["result"]
+    for kind in SUPPORTED_RENDERERS:
+        assert kind in initialized["instructions"]
+    result = _call(client, "get_biosimulant_authoring_contract", {"topics": ["visualization"]})
+    assert result["isError"] is False
+    contract = json.loads(result["content"][0]["text"])["topics"]["visualization"]
+    assert contract["catalog"] == visualization_catalog()
+    assert contract["visual_spec_schema"] == visual_spec_schema()
+    assert contract["manifest_example"]["visualization"]["required"]
+    invalid = _call(client, "get_biosimulant_authoring_contract", {"topics": ["not-local"]})
+    assert invalid["isError"] is True
+
+
 def test_lab_get_returns_the_served_lab(tmp_path: Path) -> None:
     client, session = _client(tmp_path)
 

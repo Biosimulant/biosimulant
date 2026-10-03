@@ -170,6 +170,11 @@ class BioModule(ABC):
         return
 
     def visualize(self) -> Optional["VisualSpec" | List["VisualSpec"]]:
+        """Return portable VisualSpec(s) from computed state; see visualization_catalog().
+
+        Result modules normally implement this. Plumbing modules may omit it.
+        Visualization supplements, and never replaces, typed scientific outputs.
+        """
         return None
 
 

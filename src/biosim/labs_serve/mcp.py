@@ -19,6 +19,11 @@ from typing import TYPE_CHECKING, Any
 from ..__about__ import __version__
 from ..pack import validate_lab_source
 from ..registry import PublicRegistryClient
+from ..visual_contract import (
+    VISUALIZATION_AGENT_GUIDANCE,
+    visualization_catalog,
+    visual_spec_schema,
+)
 from ..workspace import add_model as workspace_add_model
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters for type checkers
@@ -93,6 +98,22 @@ class LabMcpServer:
 
     def _build_tools(self) -> list[Tool]:
         return [
+            Tool(
+                name="get_biosimulant_authoring_contract",
+                title="Read the visualization authoring contract",
+                description=(
+                    "Read the portable visualization contract before creating a model or Lab. "
+                    "Includes all nine renderers, examples, JSON Schema, and required-view "
+                    "declarations. This local server provides the visualization topic."
+                ),
+                handler=self._visualization_contract,
+                properties={
+                    "topics": {
+                        "type": "array", "minItems": 1, "maxItems": 1,
+                        "items": {"type": "string", "enum": ["visualization"]},
+                    }
+                },
+            ),
             Tool(
                 name="lab_get",
                 title="Read the lab",
@@ -312,6 +333,33 @@ class LabMcpServer:
         client = PublicRegistryClient()
         return {"result": client.lab_info(_string(reference, "reference"))}
 
+    def _visualization_contract(self, topics: Any = None) -> dict[str, Any]:
+        if topics is not None and topics != ["visualization"]:
+            raise ToolError("This local server provides topics=['visualization'] only")
+        return {
+            "guidance": VISUALIZATION_AGENT_GUIDANCE,
+            "topics": {
+                "visualization": {
+                    "catalog": visualization_catalog(),
+                    "visual_spec_schema": visual_spec_schema(),
+                    "manifest_example": {
+                        "visualization": {
+                            "schema_version": "1",
+                            "required": [{"module": "result", "render": "timeseries", "min_count": 1}],
+                        }
+                    },
+                    "delivery": (
+                        "Implement BioModule.visualize() from computed state, keep typed outputs, "
+                        "and check the composed run's visualization report. For scientific images "
+                        "and structures use source={kind:artifact,path:...}; local runs retain "
+                        "files and replace paths with durable run artifact URLs. Verify rendering "
+                        "after reopening results. Infrastructure-only Labs may declare "
+                        "visualization={schema_version:'1',opt_out_reason:'specific reason'}."
+                    ),
+                }
+            },
+        }
+
     # ------------------------------------------------------------- dispatching
 
     def list_tools(self) -> list[dict[str, Any]]:
@@ -361,7 +409,8 @@ class LabMcpServer:
                     "instructions": (
                         "This server exposes one local Biosimulant lab: the folder the user is "
                         "serving. Read it with lab_get before changing anything, and validate "
-                        "after edits. Runs are local to this machine."
+                        "after edits. Runs are local to this machine. "
+                        + VISUALIZATION_AGENT_GUIDANCE
                     ),
                 },
             )

@@ -1,0 +1,633 @@
+{
+  "$id": "https://docs.biosimulant.com/schemas/visual-spec-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "properties": {
+        "data": {
+          "properties": {
+            "series": {
+              "items": {
+                "properties": {
+                  "name": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "points": {
+                    "items": {
+                      "items": {
+                        "type": "number"
+                      },
+                      "maxItems": 2,
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "maxItems": 10000,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "points"
+                ],
+                "type": "object"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "series"
+          ],
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "render": {
+          "const": "timeseries"
+        },
+        "schema_version": {
+          "const": "1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "render",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "required": [
+                "items"
+              ]
+            },
+            {
+              "required": [
+                "bars"
+              ]
+            }
+          ],
+          "properties": {
+            "bars": {
+              "items": {
+                "properties": {
+                  "label": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "unit": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "type": "object"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            },
+            "items": {
+              "items": {
+                "properties": {
+                  "label": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "unit": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "type": "object"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "render": {
+          "const": "bar"
+        },
+        "schema_version": {
+          "const": "1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "render",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": {
+          "properties": {
+            "points": {
+              "items": {
+                "properties": {
+                  "label": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "type": "object"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "points"
+          ],
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "render": {
+          "const": "scatter"
+        },
+        "schema_version": {
+          "const": "1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "render",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "required": [
+                "values"
+              ]
+            },
+            {
+              "required": [
+                "matrix"
+              ]
+            }
+          ],
+          "properties": {
+            "matrix": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 10000,
+                "minItems": 1,
+                "type": "array"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            },
+            "values": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 10000,
+                "minItems": 1,
+                "type": "array"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            },
+            "x_labels": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            },
+            "y_labels": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "render": {
+          "const": "heatmap"
+        },
+        "schema_version": {
+          "const": "1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "render",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": {
+          "properties": {
+            "edges": {
+              "items": {
+                "properties": {
+                  "source": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "target": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source",
+                  "target"
+                ],
+                "type": "object"
+              },
+              "maxItems": 10000,
+              "minItems": 0,
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "type": "object"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "nodes"
+          ],
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "render": {
+          "const": "graph"
+        },
+        "schema_version": {
+          "const": "1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "render",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": {
+          "properties": {
+            "columns": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            },
+            "rows": {
+              "items": {
+                "items": {},
+                "type": "array"
+              },
+              "maxItems": 10000,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "columns",
+            "rows"
+          ],
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "render": {
+          "const": "table"
+        },
+        "schema_version": {
+          "const": "1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "render",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "required": [
+                "source"
+              ]
+            },
+            {
+              "required": [
+                "src"
+              ]
+            },
+            {
+              "required": [
+                "url"
+              ]
+            }
+          ],
+          "properties": {
+            "alt": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source": {
+              "oneOf": [
+                {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "artifact_id"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "path"
+                      ]
+                    }
+                  ],
+                  "properties": {
+                    "artifact_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "artifact"
+                    },
+                    "path": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "url"
+                    },
+                    "url": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "url"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "src": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "url": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "alt"
+          ],
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "render": {
+          "const": "image"
+        },
+        "schema_version": {
+          "const": "1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "render",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": {
+          "properties": {
+            "format": {
+              "enum": [
+                "pdb",
+                "mmcif",
+                "cif"
+              ]
+            },
+            "source": {
+              "oneOf": [
+                {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "artifact_id"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "path"
+                      ]
+                    }
+                  ],
+                  "properties": {
+                    "artifact_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "artifact"
+                    },
+                    "path": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "kind": {
+                      "const": "url"
+                    },
+                    "url": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "url"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "source",
+            "format"
+          ],
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "render": {
+          "const": "structure3d"
+        },
+        "schema_version": {
+          "const": "1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "render",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "required": [
+                "text"
+              ]
+            },
+            {
+              "required": [
+                "markdown"
+              ]
+            }
+          ],
+          "properties": {
+            "markdown": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "text": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        },
+        "render": {
+          "const": "text"
+        },
+        "schema_version": {
+          "const": "1"
+        }
+      },
+      "required": [
+        "schema_version",
+        "render",
+        "data"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Biosimulant VisualSpec v1"
+}
