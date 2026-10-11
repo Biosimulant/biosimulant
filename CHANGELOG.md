@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.37] - 2026-10-11
+
 ### Fixed
 
 - Lab runs resolve all dependencies together in a disposable environment and
