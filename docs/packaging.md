@@ -244,7 +244,7 @@ The command is meant to be operator-friendly:
 
 The open-source CLI and Biosimulant platform share package interpretation semantics, but they do not share every execution policy:
 
-- `biosimulant labs run` installs exact-pinned manifest dependencies into the current Python environment when dependency installation is enabled
+- `biosimulant labs run` resolves all lab and model dependencies together in an isolated environment, then starts a fresh Python process. It never installs over the caller’s Python environment.
 - platform and desktop executors install payload dependencies into isolated per-lock-hash environments with allow/deny policy
 - `biosimulant labs run` preserves typed terminal signals under
   `outputs.<module-alias>.<port>` in JSON result and report files
@@ -301,3 +301,32 @@ If a lab depends on another model or child lab, that dependency must already exi
 the lab directory before packaging when it is path-based. Package-backed child
 Labs resolve from Hub at runtime. Use `--vendor-dependencies` for a fully
 self-contained archival package.
+
+### Python dependency environments
+
+A lab uses one Python environment for all its models, including nested Hub Labs.
+Exact pins for the same distribution must agree. Conflicts name the models or
+manifest paths involved and stop execution before model imports. Transitive
+requirements are resolved together with the executing Biosimulant runtime.
+The runtime owns its Biosimulant version; a model’s `biosimulant` pin does not
+replace it.
+
+With dependency installation enabled, `run_package()` and `biosimulant labs run`
+prepare a disposable environment and execute in a fresh process. Separate labs
+can use different package versions without changing each other or the caller.
+Results include an `environment` record containing the Python and Biosimulant
+versions, resolved distribution versions and loaded module versions and paths.
+The environment is removed when execution finishes or fails.
+
+`prepare_lab_package()` and `HubComposition.apply()` return live objects in the
+caller’s process. They validate declared and transitive dependencies without
+installing or replacing packages. Install compatible dependencies before
+starting Python, or use `run_package()` for automatic isolation. This replaces
+the previous unsafe behaviour of installing packages into a running interpreter.
+The existing `install_deps=False` / `--no-install-deps` options likewise use the
+current environment and report incompatible requirements.
+
+`biosimulant labs serve` prepares its dependency environment before launching
+the server. If an edit changes dependency pins, restart the server to prepare
+the new environment. Model objects, typed signals and wiring still share one
+process within each lab; incompatible per-model environments are not supported.

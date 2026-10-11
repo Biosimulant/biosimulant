@@ -21,12 +21,12 @@ from biosim.pack import (  # noqa: E402
     PackageError,
     _flatten_embedded_lab_dir,
     _instantiate_model_from_dir,
-    _install_declared_dependencies,
     _load_model_manifest_from_dir,
     _select_alias_override,
     coerce_typed_inputs,
     extract_communication_step,
 )
+from biosim.dependency_runtime import collect_requirements, require_current_environment
 from biosim.wiring import WiringBuilder  # noqa: E402
 from biosim.world import BioWorld  # noqa: E402
 
@@ -124,8 +124,7 @@ def snapshot_model_dir(
     source_root: Path | None,
 ) -> dict[str, Any]:
     manifest = _load_model_manifest_from_dir(model_dir)
-    if install_deps:
-        _install_declared_dependencies(manifest)
+    require_current_environment(collect_requirements([("model", manifest)]))
     module, meta = _instantiate_model_from_dir(model_dir, manifest=manifest)
     runtime = manifest.get("runtime") if isinstance(manifest.get("runtime"), Mapping) else {}
     communication_step = extract_communication_step(
@@ -173,7 +172,16 @@ def snapshot_lab_dir(
 ) -> dict[str, Any]:
     parsed_lab = _load_yaml(lab_dir / "lab.yaml")
     runtime = parsed_lab.get("runtime") if isinstance(parsed_lab.get("runtime"), Mapping) else {}
-    models, wiring, _ = _flatten_embedded_lab_dir(payload_root=lab_dir, current_lab_dir=lab_dir)
+    dependency_manifests = []
+    models, wiring, _ = _flatten_embedded_lab_dir(
+        payload_root=lab_dir, current_lab_dir=lab_dir,
+        dependency_manifests=dependency_manifests,
+    )
+    dependency_manifests.extend(
+        (entry["alias"], _load_model_manifest_from_dir(Path(entry["model_dir"])))
+        for entry in models
+    )
+    require_current_environment(collect_requirements(dependency_manifests))
     communication_step = extract_communication_step(None, runtime, error_cls=PackageError)
     run_duration = float(duration if duration is not None else runtime.get("duration", 1.0))
 
@@ -192,8 +200,6 @@ def snapshot_lab_dir(
         model_dir = model_paths_by_alias[alias]
         manifest = _load_model_manifest_from_dir(model_dir)
         manifests_by_alias[alias] = manifest
-        if install_deps:
-            _install_declared_dependencies(manifest)
         parameters = entry.get("parameters") if isinstance(entry.get("parameters"), Mapping) else {}
         module, meta = _instantiate_model_from_dir(
             model_dir,

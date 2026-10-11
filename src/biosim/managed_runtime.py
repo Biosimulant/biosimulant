@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -70,18 +71,28 @@ def run_labs_serve_with_managed_python(
         return None
 
     requested = requested_package_python_version(package_file)
-    if requested is None or requested == _current_python_minor():
-        return None
-
-    python_path = ensure_executor_python(requested)
-    env = dict(os.environ)
-    env[BIOSIM_MANAGED_RUNTIME_CHILD_ENV] = "1"
-    _log_managed_python_handoff("labs serve", requested, python_path)
-    completed = subprocess.run(
-        [str(python_path), "-m", "biosim", *argv],
-        env=env,
+    python_path = (
+        ensure_executor_python(requested)
+        if requested is not None and requested != _current_python_minor()
+        else Path(sys.executable)
     )
-    return completed.returncode
+    from .dependency_runtime import isolated_environment
+    requirements = requested_package_requirements(package_file)
+    if not requirements and python_path == Path(sys.executable):
+        return None
+    environment = (
+        isolated_environment(requirements, python=python_path)
+        if requirements and "--no-install-deps" not in argv
+        else nullcontext(python_path)
+    )
+    with environment as executable:
+        env = dict(os.environ)
+        env[BIOSIM_MANAGED_RUNTIME_CHILD_ENV] = "1"
+        env.pop("PYTHONPATH", None)
+        env.pop("PYTHONHOME", None)
+        env["PATH"] = str(executable.parent) + os.pathsep + env.get("PATH", "")
+        completed = subprocess.run([str(executable), "-m", "biosim", *argv], env=env)
+        return completed.returncode
 
 
 def _log_managed_python_handoff(command: str, python_version: str, python_path: Path) -> None:
@@ -103,6 +114,16 @@ def requested_package_python_version(package_file: str | Path) -> str | None:
         if loaded.package_type != "lab":
             return None
         return _declared_lab_python_version(loaded.manifest)
+
+
+def requested_package_requirements(package_file: str | Path) -> list[str]:
+    from .pack import _package_requirements
+
+    with tempfile.TemporaryDirectory(prefix="biosim-runtime-inspect-") as directory:
+        loaded = _loaded_package_from_path(
+            Path(package_file).expanduser().resolve(), unpack_root=Path(directory),
+        )
+        return _package_requirements(loaded)
 
 
 def ensure_executor_python(python_version: str) -> Path:
@@ -148,15 +169,19 @@ def run_child_package(
     *,
     install_deps: bool,
     dependency_root: str | Path | None = None,
+    dependency_logger: Callable[[str], None] | None = None,
+    process_tracker: Callable[[Any], Any] | None = None,
+    cancel_checker: Callable[[], None] | None = None,
+    unpack_root: str | Path | None = None,
 ) -> dict[str, Any]:
     code = "\n".join(
         [
             "import json, sys",
             "from biosim.pack import run_package",
             "from biosim.compatibility import CompatibilityError",
-            "root = sys.argv[3] if len(sys.argv) > 3 else None",
+            "options = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}",
             "try:",
-            "    result = run_package(sys.argv[1], install_deps=(sys.argv[2] == '1'), dependency_root=root)",
+            "    result = run_package(sys.argv[1], install_deps=(sys.argv[2] == '1'), **options)",
             "except CompatibilityError as exc:",
             f"    print(json.dumps({{{_CHILD_ERROR_KEY!r}: exc.to_dict()}}, sort_keys=True))",
             f"    sys.exit({_CHILD_COMPATIBILITY_EXIT})",
@@ -167,6 +192,9 @@ def run_child_package(
     env[BIOSIM_MANAGED_RUNTIME_CHILD_ENV] = "1"
     # Line-buffer the child so its progress reaches the parent while it runs.
     env["PYTHONUNBUFFERED"] = "1"
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
+    env["PATH"] = str(python_path.parent) + os.pathsep + env.get("PATH", "")
     command = [
         str(python_path),
         "-c",
@@ -174,8 +202,17 @@ def run_child_package(
         str(package_file),
         "1" if install_deps else "0",
     ]
+    options = {}
     if dependency_root is not None:
-        command.append(str(dependency_root))
+        options["dependency_root"] = str(dependency_root)
+    if unpack_root is not None:
+        options["unpack_root"] = str(unpack_root)
+    if options:
+        command.append(json.dumps(options))
+    from .pack import _new_process_group_kwargs
+
+    if cancel_checker is not None:
+        cancel_checker()
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -183,6 +220,7 @@ def run_child_package(
         text=True,
         bufsize=1,
         env=env,
+        **_new_process_group_kwargs(),
     )
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
@@ -191,20 +229,38 @@ def run_child_package(
         threading.Thread(
             target=_relay_child_stream,
             args=(process.stdout, stdout_lines, relay_lock),
-            kwargs={"skip_json_result": True},
+            kwargs={"skip_json_result": True, "logger": dependency_logger},
             daemon=True,
         ),
         threading.Thread(
             target=_relay_child_stream,
             args=(process.stderr, stderr_lines, relay_lock),
+            kwargs={"logger": dependency_logger},
             daemon=True,
         ),
     ]
-    for reader in readers:
-        reader.start()
-    returncode = process.wait()
-    for reader in readers:
-        reader.join()
+    with process_tracker(process) if process_tracker is not None else nullcontext():
+        for reader in readers:
+            reader.start()
+        returncode = None
+        try:
+            if cancel_checker is None:
+                returncode = process.wait()
+            else:
+                while returncode is None:
+                    cancel_checker()
+                    try:
+                        returncode = process.wait(timeout=0.1)
+                    except subprocess.TimeoutExpired:
+                        continue
+        finally:
+            if returncode is None:
+                from .dependency_runtime import terminate_process
+                terminate_process(process)
+            for reader in readers:
+                reader.join()
+    if cancel_checker is not None:
+        cancel_checker()
     stdout = "".join(stdout_lines)
     stderr = "".join(stderr_lines)
     if returncode == _CHILD_COMPATIBILITY_EXIT:
@@ -242,6 +298,7 @@ def _relay_child_stream(
     lock: threading.Lock,
     *,
     skip_json_result: bool = False,
+    logger: Callable[[str], None] | None = None,
 ) -> None:
     """Collect a child stream and relay each line to stderr as it arrives.
 
@@ -256,8 +313,11 @@ def _relay_child_stream(
         if skip_json_result and _is_json_object_line(line):
             continue
         with lock:
-            sys.stderr.write(line if line.endswith("\n") else f"{line}\n")
-            sys.stderr.flush()
+            if logger is not None:
+                logger(line.rstrip())
+            else:
+                sys.stderr.write(line if line.endswith("\n") else f"{line}\n")
+                sys.stderr.flush()
 
 
 def _is_json_object_line(line: str) -> bool:

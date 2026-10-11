@@ -8,10 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
-import sysconfig
 import tempfile
-from contextlib import nullcontext
-from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -1302,13 +1299,18 @@ def _validate_embedded_lab_package(
     entry_manifest: str,
 ) -> None:
     package_root = posixpath.dirname(entry_manifest)
+    manifests: list[tuple[str, Mapping[str, Any]]] = []
     _validate_embedded_lab_package_dir(
         entries=entries,
         parsed_manifest=parsed_manifest,
         package_root=package_root,
         current_dir=package_root,
         visited=set(),
+        dependency_manifests=manifests,
     )
+    from .dependency_runtime import collect_requirements
+
+    collect_requirements(manifests, python_version=_declared_lab_python_version(parsed_manifest))
 
 
 def _validate_embedded_lab_package_dir(
@@ -1318,12 +1320,14 @@ def _validate_embedded_lab_package_dir(
     package_root: str,
     current_dir: str,
     visited: set[str],
+    dependency_manifests: list[tuple[str, Mapping[str, Any]]],
 ) -> None:
     if current_dir in visited:
         raise PackageError(
             f"Circular embedded child lab reference detected at {current_dir}"
         )
     visited = visited | {current_dir}
+    dependency_manifests.append((current_dir, parsed_manifest))
 
     models = parsed_manifest.get("models")
     if isinstance(models, list):
@@ -1347,6 +1351,7 @@ def _validate_embedded_lab_package_dir(
                 parsed_model = _safe_yaml_load(entries[manifest_path])
                 _validate_model_manifest(parsed_model)
                 _validate_dependencies(parsed_model)
+                dependency_manifests.append((model_dir, parsed_model))
             except PackageError as exc:
                 raise PackageError(
                     f"Invalid embedded model manifest at {manifest_path}: {exc}"
@@ -1382,6 +1387,7 @@ def _validate_embedded_lab_package_dir(
             package_root=package_root,
             current_dir=child_dir,
             visited=visited,
+            dependency_manifests=dependency_manifests,
         )
 
 
@@ -1404,6 +1410,7 @@ def _flatten_embedded_lab_dir(
     prefix: str = "",
     visited: set[Path] | None = None,
     depth: int = 0,
+    dependency_manifests: list[tuple[str, Mapping[str, Any]]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     if prefix:
         raise PackageError("Internal lab tree flattening no longer accepts a prefix")
@@ -1412,6 +1419,7 @@ def _flatten_embedded_lab_dir(
         current_lab_dir=current_lab_dir,
         visited=visited,
         depth=depth,
+        dependency_manifests=dependency_manifests,
     )
     flattened = flatten_lab_tree(tree, max_depth=5, error_cls=PackageError)
     return flattened.models, flattened.wiring, parsed_lab
@@ -1423,6 +1431,7 @@ def _embedded_lab_tree_from_dir(
     current_lab_dir: Path,
     visited: set[Path] | None = None,
     depth: int = 0,
+    dependency_manifests: list[tuple[str, Mapping[str, Any]]] | None = None,
 ) -> tuple[LabTree, dict[str, Any]]:
     if depth > 5:
         raise PackageError("Lab nesting exceeds maximum depth of 5")
@@ -1436,6 +1445,8 @@ def _embedded_lab_tree_from_dir(
     visited_paths.add(current_key)
 
     parsed_lab = _load_lab_manifest_from_dir(current_lab_dir)
+    if dependency_manifests is not None:
+        dependency_manifests.append((str(current_lab_dir / "lab.yaml"), parsed_lab))
     models = parsed_lab.get("models")
     wiring = parsed_lab.get("wiring")
     if not isinstance(models, list) or not isinstance(wiring, list):
@@ -1488,6 +1499,7 @@ def _embedded_lab_tree_from_dir(
                 current_lab_dir=child_dir,
                 visited=visited_paths,
                 depth=depth + 1,
+                dependency_manifests=dependency_manifests,
             )
             tree_children.append(
                 LabTreeChild(
@@ -1532,6 +1544,9 @@ def _prepare_lab_loaded_package(
     if not isinstance(runtime, Mapping):
         raise PackageError("Lab manifest must contain models, wiring, and runtime")
     _ensure_lab_python_version_matches_current(loaded.manifest)
+    from .dependency_runtime import require_current_environment
+
+    require_current_environment(_package_requirements(loaded, dependency_root))
     has_package_children = bool(_package_children(loaded.manifest))
     if has_package_children:
         models: list[dict[str, Any]] = []
@@ -1625,13 +1640,6 @@ def _prepare_lab_loaded_package(
             raise PackageError("Lab model entries require a resolved model_dir")
         model_path = Path(model_dir)
         manifest = _load_model_manifest_from_dir(model_path)
-        if install_deps:
-            _install_declared_dependencies(
-                manifest,
-                dependency_logger=dependency_logger,
-                process_tracker=dependency_process_tracker,
-                cancel_checker=cancel_checker,
-            )
         parameters = (
             entry.get("parameters")
             if isinstance(entry.get("parameters"), Mapping)
@@ -1754,8 +1762,11 @@ def _run_lab_loaded_package(
     requirements = prepared.manifest.get("visualization")
     if requirements is None and isinstance(prepared.manifest.get("raw"), Mapping):
         requirements = prepared.manifest["raw"].get("visualization")
+    from .dependency_runtime import environment_record
+
     return strict_results(
         {
+            "environment": environment_record(),
             "package": prepared.package,
             "version": prepared.version,
             "duration": duration,
@@ -1843,148 +1854,35 @@ def _port_remap_for_child(
     return remap
 
 
-def _install_declared_dependencies(
-    manifest: Mapping[str, Any],
-    *,
-    dependency_logger: DependencyLogger | None = None,
-    process_tracker: ProcessTracker | None = None,
-    cancel_checker: CancelChecker | None = None,
-) -> None:
-    runtime = manifest.get("runtime")
-    if not isinstance(runtime, Mapping):
-        return
-    dependencies = runtime.get("dependencies")
-    if not isinstance(dependencies, Mapping):
-        return
-    packages = dependencies.get("packages")
-    if not isinstance(packages, list) or not packages:
-        return
-    bad = [
-        dep for dep in packages if not isinstance(dep, str) or not _is_exact_pin(dep)
-    ]
-    if bad:
-        raise PackageError(f"All dependencies must use exact pins: {bad}")
-    runtime_pins = [dep for dep in packages if _is_runtime_distribution_pin(dep)]
-    if runtime_pins:
-        # Models run inside the interpreter of the runtime orchestrating them.
-        # Installing another biosimulant there would replace that runtime
-        # mid-run and in any cached managed-runtime venv.
-        notice = (
-            f"Using the running Biosimulant runtime {__version__}; "
-            f"not installing {', '.join(runtime_pins)} into this interpreter."
-        )
-        if dependency_logger is not None:
-            dependency_logger(notice)
-        else:
-            print(notice, file=sys.stderr, flush=True)
-        packages = [dep for dep in packages if dep not in runtime_pins]
-        if not packages:
-            return
-    _ensure_interpreter_scripts_on_path()
-    command = _dependency_install_command(packages)
-    if cancel_checker is not None:
-        cancel_checker()
-    if dependency_logger is None and process_tracker is None and cancel_checker is None:
-        completed = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if completed.returncode != 0:
-            raise PackageError(
-                f"Dependency installation failed with exit code {completed.returncode}.\n"
-                f"Recent pip output:\n{_dependency_output_tail(completed.stdout, completed.stderr)}"
-            )
-        return
+def _package_requirements(
+    loaded: _LoadedPackage, dependency_root: Path | None = None,
+) -> list[str]:
+    from .dependency_runtime import collect_requirements
 
-    if dependency_logger is not None:
-        dependency_logger(f"Installing dependencies: {' '.join(packages)}")
-    recent: deque[str] = deque(maxlen=40)
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        **_new_process_group_kwargs(),
+    manifests: list[tuple[str, Mapping[str, Any]]] = []
+    if _package_children(loaded.manifest):
+        from .hub import _LabDependencyResolver, _tree_from_lab_dir
+
+        resolver = _LabDependencyResolver(
+            lab_root=loaded.payload_root,
+            registry_url=None,
+            dependency_root=dependency_root,
+        )
+        tree, _manifest = _tree_from_lab_dir(
+            lab_dir=loaded.payload_root, resolver=resolver,
+            dependency_manifests=manifests,
+        )
+        models = flatten_lab_tree(tree, error_cls=PackageError).models
+    else:
+        models, _wiring, _manifest = _flatten_embedded_lab_dir(
+            payload_root=loaded.payload_root, current_lab_dir=loaded.payload_root,
+            dependency_manifests=manifests,
+        )
+    manifests.extend(
+        (entry["alias"], _load_model_manifest_from_dir(Path(entry["model_dir"])))
+        for entry in models
     )
-    with process_tracker(process) if process_tracker is not None else nullcontext():
-        assert process.stdout is not None
-        try:
-            for raw_line in process.stdout:
-                if cancel_checker is not None:
-                    cancel_checker()
-                line = raw_line.rstrip()
-                if not line:
-                    continue
-                recent.append(line)
-                if dependency_logger is not None:
-                    dependency_logger(line)
-        finally:
-            process.stdout.close()
-        returncode = process.wait()
-    if cancel_checker is not None:
-        cancel_checker()
-    if returncode != 0:
-        tail = "\n".join(recent) if recent else "No pip output captured."
-        raise PackageError(
-            f"Dependency installation failed with exit code {returncode}.\n"
-            f"Recent pip output:\n{tail}"
-        )
-
-
-def _ensure_interpreter_scripts_on_path() -> None:
-    """Expose console scripts from dependencies installed into this interpreter.
-
-    Dependencies are installed with ``--python sys.executable``; a model that
-    shells out to one of them (for example a ``boltz`` CLI) must find it on PATH
-    even when this interpreter's environment was never activated.
-    """
-    scripts_dir = sysconfig.get_path("scripts")
-    if not scripts_dir:
-        return
-    parts = [part for part in os.environ.get("PATH", "").split(os.pathsep) if part]
-    if scripts_dir in parts:
-        return
-    os.environ["PATH"] = os.pathsep.join([scripts_dir, *parts])
-
-
-def _dependency_install_command(packages: list[str]) -> list[str]:
-    python = sys.executable
-    if _uv_module_available():
-        return [
-            python,
-            "-m",
-            "uv",
-            "pip",
-            "install",
-            "--python",
-            python,
-            *packages,
-        ]
-    return [python, "-m", "pip", "install", *packages]
-
-
-def _uv_module_available() -> bool:
-    try:
-        completed = subprocess.run(
-            [sys.executable, "-m", "uv", "--version"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except OSError:
-        return False
-    return completed.returncode == 0
-
-
-def _dependency_output_tail(stdout: str | None, stderr: str | None) -> str:
-    lines: list[str] = []
-    if stdout:
-        lines.extend(stdout.splitlines())
-    if stderr:
-        lines.extend(stderr.splitlines())
-    return "\n".join(lines[-40:]) if lines else "No pip output captured."
+    return collect_requirements(manifests, python_version=_declared_lab_python_version(loaded.manifest))
 
 
 def run_package(
@@ -2013,6 +1911,22 @@ def run_package(
         unpack_root=Path(unpack_root).expanduser().resolve(),
     )
     if loaded.package_type == "lab":
+        root = Path(dependency_root).expanduser().resolve() if dependency_root else None
+        requirements = _package_requirements(loaded, root)
+        if install_deps and requirements:
+            from .dependency_runtime import isolated_environment
+            from .managed_runtime import run_child_package
+
+            with isolated_environment(
+                requirements, dependency_logger=dependency_logger,
+                process_tracker=dependency_process_tracker, cancel_checker=cancel_checker,
+            ) as python:
+                return run_child_package(
+                    python, loaded.package_path, install_deps=False,
+                    dependency_root=root, unpack_root=loaded.unpacked_root,
+                    dependency_logger=dependency_logger,
+                    process_tracker=dependency_process_tracker, cancel_checker=cancel_checker,
+                )
         return _run_lab_loaded_package(
             loaded,
             install_deps=install_deps,

@@ -308,30 +308,13 @@ def test_violations_are_capped_and_flagged() -> None:
     assert record["summary"]["value_failures"] == 150
 
 
-def test_model_pins_on_the_runtime_are_not_installed(monkeypatch, capsys) -> None:
-    calls: list[list[str]] = []
-
-    class _Completed:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    def fake_run(command, **_kwargs):
-        calls.append(list(command))
-        return _Completed()
-
-    monkeypatch.setattr(pack_module, "_uv_module_available", lambda: False)
-    monkeypatch.setattr(pack_module.subprocess, "run", fake_run)
+def test_model_pins_on_the_runtime_are_not_installed() -> None:
+    from biosim.dependency_runtime import collect_requirements
 
     manifest = {"runtime": {"dependencies": {"packages": ["biosimulant==0.0.1"]}}}
-    pack_module._install_declared_dependencies(manifest)
-    assert calls == []
-    assert "not installing biosimulant==0.0.1" in capsys.readouterr().err
-
+    assert collect_requirements([("model", manifest)]) == []
     manifest["runtime"]["dependencies"]["packages"] = ["Biosimulant[onnx]==0.0.1", "pyyaml==6.0.2"]
-    pack_module._install_declared_dependencies(manifest)
-    assert calls[-1][-1] == "pyyaml==6.0.2"
-    assert not any("iosimulant" in part for part in calls[-1])
+    assert collect_requirements([("model", manifest)]) == ["pyyaml==6.0.2"]
 
 
 def test_managed_child_compatibility_error_is_rebuilt(monkeypatch, tmp_path: Path) -> None:

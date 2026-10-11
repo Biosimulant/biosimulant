@@ -9,6 +9,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- Lab runs resolve all dependencies together in a disposable environment and
+  execute in a fresh Python process, preventing installed/loaded version
+  mismatches. Results record the actual environment. Live-object APIs validate
+  dependencies instead of replacing packages in the caller's process.
 - Run results are strict JSON. `labs run` (including `--results-file`,
   `--report-file` and `--json`) and `labs serve` replace NaN and ±Infinity
   with `null` and list each replacement under `non_finite_values`, so one

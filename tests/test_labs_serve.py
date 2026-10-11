@@ -8,12 +8,33 @@ import time
 import types
 from pathlib import Path
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from biosim.labs_serve import server
 from biosim.labs_serve.server import LabServeSession, RunRecord, create_app
 from biosim.pack import _safe_yaml_dump, _safe_yaml_load
 from tests.test_pack import _write_lab
+
+
+@pytest.fixture(autouse=True)
+def join_session_threads(monkeypatch):
+    sessions = []
+    original = LabServeSession.__init__
+
+    def initialize(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        sessions.append(self)
+
+    monkeypatch.setattr(LabServeSession, "__init__", initialize)
+    yield
+    for session in sessions:
+        threads = [session._runtime_metadata_thread, *(run.thread for run in session._runs.values())]
+        for thread in threads:
+            if thread is not None:
+                thread.join(timeout=5)
+                assert not thread.is_alive(), "Session thread outlived its test"
 
 
 def _client(lab: Path) -> tuple[TestClient, LabServeSession]:

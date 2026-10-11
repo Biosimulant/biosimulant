@@ -15,7 +15,6 @@ from typing import Any, Mapping
 
 from .pack import (
     PackageError,
-    _install_declared_dependencies,
     _instantiate_model_from_dir,
     _load_lab_manifest_from_dir,
     _load_model_manifest_from_dir,
@@ -207,6 +206,7 @@ def _tree_from_lab_dir(
     resolver: _LabDependencyResolver,
     visited: set[Path] | None = None,
     depth: int = 0,
+    dependency_manifests: list[tuple[str, Mapping[str, Any]]] | None = None,
 ) -> tuple[LabTree, dict[str, Any]]:
     if depth > 5:
         raise PackageError("Lab nesting exceeds maximum depth of 5")
@@ -216,6 +216,8 @@ def _tree_from_lab_dir(
         raise PackageError(f"Circular child lab reference detected at {lab_dir}")
     seen.add(key)
     manifest = _load_lab_manifest_from_dir(lab_dir)
+    if dependency_manifests is not None:
+        dependency_manifests.append((str(lab_dir / "lab.yaml"), manifest))
     tree = LabTree(io=lab_io_from_mapping(manifest.get("io")))
     for entry in manifest.get("models", []):
         if not isinstance(entry, Mapping):
@@ -241,7 +243,8 @@ def _tree_from_lab_dir(
                 raise PackageError(f"Lab child '{alias}' requires path or package and version")
             child_dir = resolver.resolve(package=package, version=version, declaring_lab_dir=lab_dir)
         child_tree, child_manifest = _tree_from_lab_dir(
-            lab_dir=child_dir, resolver=resolver, visited=seen, depth=depth + 1
+            lab_dir=child_dir, resolver=resolver, visited=seen, depth=depth + 1,
+            dependency_manifests=dependency_manifests,
         )
         tree.children.append(LabTreeChild(alias=alias, tree=child_tree, io=lab_io_from_mapping(child_manifest.get("io"))))
     for entry in manifest.get("wiring", []):
@@ -271,6 +274,7 @@ class HubComposition:
             dependency_root=Path(dependency_root).expanduser() if dependency_root else None,
         )
         self._tree = LabTree()
+        self._dependency_manifests: list[tuple[str, Mapping[str, Any]]] = []
         self._setup_config: dict[str, dict[str, Any]] = {}
 
     @property
@@ -284,7 +288,10 @@ class HubComposition:
         if any(child.alias == alias for child in self._tree.children):
             raise PackageError(f"Duplicate Hub component alias: {alias}")
         lab_dir = self._resolver.resolve(package=parsed.package_name, version=parsed.version, declaring_lab_dir=self.lab_root)
-        child_tree, manifest = _tree_from_lab_dir(lab_dir=lab_dir, resolver=self._resolver)
+        child_tree, manifest = _tree_from_lab_dir(
+            lab_dir=lab_dir, resolver=self._resolver,
+            dependency_manifests=self._dependency_manifests,
+        )
         self._tree.children.append(LabTreeChild(alias=alias, tree=child_tree, io=lab_io_from_mapping(manifest.get("io"))))
         return self
 
@@ -294,7 +301,8 @@ class HubComposition:
 
     def apply(self, *, install_deps: bool = True) -> None:
         self._setup_config, _modules, _module_instances = _apply_tree_to_world(
-            world=self.world, tree=self._tree, install_deps=install_deps
+            world=self.world, tree=self._tree, install_deps=install_deps,
+            dependency_manifests=self._dependency_manifests,
         )
 
     def setup(self) -> None:
@@ -311,8 +319,17 @@ def _apply_tree_to_world(
     dependency_logger: Any = None,
     dependency_process_tracker: Any = None,
     cancel_checker: Any = None,
+    dependency_manifests: list[tuple[str, Mapping[str, Any]]] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     flattened = flatten_lab_tree(tree, error_cls=PackageError)
+    from .dependency_runtime import collect_requirements, require_current_environment
+
+    manifests = list(dependency_manifests or [])
+    manifests.extend(
+        (entry["alias"], _load_model_manifest_from_dir(Path(entry["model_dir"])))
+        for entry in flattened.models
+    )
+    require_current_environment(collect_requirements(manifests))
     builder = WiringBuilder(world)
     setup_config: dict[str, dict[str, Any]] = {}
     resolved: list[dict[str, Any]] = []
@@ -321,13 +338,6 @@ def _apply_tree_to_world(
         alias = entry["alias"]
         model_dir = Path(str(entry["model_dir"]))
         manifest = _load_model_manifest_from_dir(model_dir)
-        if install_deps:
-            _install_declared_dependencies(
-                manifest,
-                dependency_logger=dependency_logger,
-                process_tracker=dependency_process_tracker,
-                cancel_checker=cancel_checker,
-            )
         module, meta = _instantiate_model_from_dir(
             model_dir, manifest=manifest, parameters=entry.get("parameters") or {}
         )
@@ -356,11 +366,15 @@ def _prepare_package_backed_lab(
     resolver = _LabDependencyResolver(
         lab_root=lab_root, registry_url=registry_url, dependency_root=dependency_root
     )
-    tree, manifest = _tree_from_lab_dir(lab_dir=lab_root, resolver=resolver)
+    manifests: list[tuple[str, Mapping[str, Any]]] = []
+    tree, manifest = _tree_from_lab_dir(
+        lab_dir=lab_root, resolver=resolver, dependency_manifests=manifests,
+    )
     setup_config, modules, modules_by_alias = _apply_tree_to_world(
         world=world,
         tree=tree,
         install_deps=install_deps,
+        dependency_manifests=manifests,
         dependency_logger=dependency_logger,
         dependency_process_tracker=dependency_process_tracker,
         cancel_checker=cancel_checker,

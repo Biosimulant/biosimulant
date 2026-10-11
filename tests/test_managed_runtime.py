@@ -115,6 +115,7 @@ def test_run_labs_serve_with_managed_python_skips_without_declared_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv(managed_runtime.BIOSIM_MANAGED_RUNTIME_CHILD_ENV, raising=False)
+    monkeypatch.setattr(managed_runtime, "requested_package_requirements", lambda _path: [])
     monkeypatch.setattr(
         managed_runtime,
         "requested_package_python_version",
@@ -138,6 +139,7 @@ def test_run_labs_serve_with_managed_python_skips_when_version_matches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv(managed_runtime.BIOSIM_MANAGED_RUNTIME_CHILD_ENV, raising=False)
+    monkeypatch.setattr(managed_runtime, "requested_package_requirements", lambda _path: [])
     monkeypatch.setattr(
         managed_runtime,
         "requested_package_python_version",
@@ -163,6 +165,7 @@ def test_run_labs_serve_with_managed_python_spawns_on_mismatch(
 ) -> None:
     observed: dict[str, object] = {}
     monkeypatch.delenv(managed_runtime.BIOSIM_MANAGED_RUNTIME_CHILD_ENV, raising=False)
+    monkeypatch.setattr(managed_runtime, "requested_package_requirements", lambda _path: [])
     monkeypatch.setattr(
         managed_runtime,
         "requested_package_python_version",
