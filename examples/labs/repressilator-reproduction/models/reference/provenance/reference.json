@@ -15,5 +15,8 @@
     "PX": 0,
     "PY": 0,
     "PZ": 0
-  }
+  },
+  "adapter": "RoadRunner-only BioModule, explicitly user-authorized 2026-10-20",
+  "engine": "libroadrunner==2.8.0; CVODE",
+  "source_transformation": "none"
 }

@@ -12,7 +12,6 @@ runtime:
   dependencies:
     packages:
       - biosimulant==0.0.37
-      - tellurium==2.2.11.2
       - libroadrunner==2.8.0
       - scipy==1.15.3
       - numpy==2.2.6

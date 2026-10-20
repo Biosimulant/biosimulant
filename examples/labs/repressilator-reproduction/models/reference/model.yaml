@@ -2,7 +2,7 @@ schema_version: "2.0"
 package: repressilator-reference
 version: 0.1.0
 title: Elowitz2000 - Repressilator
-description: Canonical temporal adapter for exact BioModels revision-3; copies per cell and minutes.
+description: RoadRunner-only temporal adapter for unmodified BioModels revision-3; copies per cell and minutes.
 standard: sbml
 biosim:
   entrypoint: src.reference:RepressilatorReference
@@ -12,7 +12,6 @@ runtime:
   dependencies:
     packages:
       - biosimulant==0.0.37
-      - tellurium==2.2.11.2
       - libroadrunner==2.8.0
       - scipy==1.15.3
       - numpy==2.2.6
