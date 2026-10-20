@@ -1,0 +1,19 @@
+{
+  "source": "BioModels",
+  "identifier": "BIOMD0000000012",
+  "revision": "revision-3",
+  "sha256": "d535c84bc5fe68b01728cac5c53f8fed971176e3f0f2367a9ba1e9c043b11a2d",
+  "license": "CC0",
+  "source_url": "https://www.biomodels.org/BIOMD0000000012",
+  "immutable": true,
+  "source_time_unit": "min",
+  "quantity": "molecules per effective single cell",
+  "initial_state": {
+    "X": 0,
+    "Y": 20,
+    "Z": 0,
+    "PX": 0,
+    "PY": 0,
+    "PZ": 0
+  }
+}

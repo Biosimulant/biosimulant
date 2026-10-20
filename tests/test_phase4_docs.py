@@ -13,6 +13,8 @@ COMPATIBILITY_DOCS = {
 }
 TEMPORAL_HOOK_EXAMPLE_ALLOWLIST = {ROOT / "docs" / "biomodule.md"}
 TEMPORAL_COMPATIBILITY_REFERENCE_ALLOWLIST = {
+    # Imported SBML adapters retain their supported temporal lifecycle.
+    ROOT / "examples" / "labs" / "repressilator-reproduction" / "tests" / "test_reference.py",
     ROOT / "CHANGELOG.md",
     ROOT / "README.md",
     ROOT / "docs" / "biomodule.md",
