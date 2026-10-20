@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "scope": "local CPython 3.11/3.12 Linux x86_64 candidate",
+  "sources": {
+    "antimony": {
+      "candidates": [
+        {
+          "filename": "antimony-3.2.0-1bsim1-cp311-none-linux_x86_64.whl",
+          "modified_members": [
+            "antimony-3.2.0.dist-info/WHEEL",
+            "antimony-3.2.0.dist-info/RECORD"
+          ],
+          "original_tags": [
+            "Tag: cp313-cp313-linux_x86_64"
+          ],
+          "sha256": "be89044a920f214fc12116231e1b9bdf1aa425f9d415b1c2eefc1ff813a4bf7c",
+          "tag": "cp311-none-linux_x86_64",
+          "unchanged_payload_sha256": {
+            "antimony-3.2.0.dist-info/METADATA": "f2f0620b27d20cc92e976c474fc8ec68f502deeb18c5e3c637b2dc8e8d736bd3",
+            "antimony-3.2.0.dist-info/top_level.txt": "b827e54cf74ea10b22f8a1b813143d52579897123f983fe5038778af1e4ec830",
+            "antimony/__init__.py": "29821a56f9957f39ae4e993780d386de0432023e0cad42112256b56b1eb657aa",
+            "antimony/antimony.py": "cdddf10de23cc746cb8cf2dec236c2318836497b0a3bfdea801bbdb458ea5a21",
+            "antimony/libantimony.so": "9a9eeb7f589d16d2977aee129bf40e353206b725863a8691ae8976612cec07a2"
+          }
+        },
+        {
+          "filename": "antimony-3.2.0-1bsim1-cp312-none-linux_x86_64.whl",
+          "modified_members": [
+            "antimony-3.2.0.dist-info/WHEEL",
+            "antimony-3.2.0.dist-info/RECORD"
+          ],
+          "original_tags": [
+            "Tag: cp313-cp313-linux_x86_64"
+          ],
+          "sha256": "f18810ac338187717c5f04044d1690a339a68efdd3af7cec9ff98c6793b413a9",
+          "tag": "cp312-none-linux_x86_64",
+          "unchanged_payload_sha256": {
+            "antimony-3.2.0.dist-info/METADATA": "f2f0620b27d20cc92e976c474fc8ec68f502deeb18c5e3c637b2dc8e8d736bd3",
+            "antimony-3.2.0.dist-info/top_level.txt": "b827e54cf74ea10b22f8a1b813143d52579897123f983fe5038778af1e4ec830",
+            "antimony/__init__.py": "29821a56f9957f39ae4e993780d386de0432023e0cad42112256b56b1eb657aa",
+            "antimony/antimony.py": "cdddf10de23cc746cb8cf2dec236c2318836497b0a3bfdea801bbdb458ea5a21",
+            "antimony/libantimony.so": "9a9eeb7f589d16d2977aee129bf40e353206b725863a8691ae8976612cec07a2"
+          }
+        }
+      ],
+      "filename": "antimony-3.2.0-py3-none-manylinux_2_28_x86_64.whl",
+      "sha256": "2036c1dcf699a8f1dedf35d26007e0060ddbd91f9f4bb9f4d05fa8a79cc7c2fd",
+      "url": "https://files.pythonhosted.org/packages/c8/31/9790f2be8b22c2a8269862ba226530ca8b1cf620a7c398c278a6080a6014/antimony-3.2.0-py3-none-manylinux_2_28_x86_64.whl"
+    },
+    "phrasedml": {
+      "candidates": [
+        {
+          "filename": "phrasedml-1.3.0-1bsim1-cp311-none-linux_x86_64.whl",
+          "modified_members": [
+            "phrasedml-1.3.0.dist-info/WHEEL",
+            "phrasedml-1.3.0.dist-info/RECORD"
+          ],
+          "original_tags": [
+            "Tag: cp39-cp39-linux_x86_64"
+          ],
+          "sha256": "9cc9dd27aeb200e8e10d958a3b2950762a2f6237e5ecffdc53b9d3ea3c150574",
+          "tag": "cp311-none-linux_x86_64",
+          "unchanged_payload_sha256": {
+            "phrasedml-1.3.0.dist-info/METADATA": "97771bfd100a8fa4e435095ece9c02efd5de58d60c0a012b767cb68b358a9d84",
+            "phrasedml-1.3.0.dist-info/top_level.txt": "1e7598cf6617291c0de520aec12c648a2a0d33cfaff14292c06235e741b10a40",
+            "phrasedml/__init__.py": "32f0251d6b8cfe98a1f304f57ff5ebeeb8afddced4836002c8373aa01743547c",
+            "phrasedml/libphrasedml.so": "f39b7b1e4fe383a9f75bc5b35d57f668ef76deb68050680a97a027cda1bc539b",
+            "phrasedml/phrasedml.py": "04e9caf735f9d88aab7dd4b42046536d8b467a97938d108e2517ad4af8e08a5e"
+          }
+        },
+        {
+          "filename": "phrasedml-1.3.0-1bsim1-cp312-none-linux_x86_64.whl",
+          "modified_members": [
+            "phrasedml-1.3.0.dist-info/WHEEL",
+            "phrasedml-1.3.0.dist-info/RECORD"
+          ],
+          "original_tags": [
+            "Tag: cp39-cp39-linux_x86_64"
+          ],
+          "sha256": "df24c730d99ed44325be791231760a7c047aa223d6b6a602ebf2b9e2a52a5f3d",
+          "tag": "cp312-none-linux_x86_64",
+          "unchanged_payload_sha256": {
+            "phrasedml-1.3.0.dist-info/METADATA": "97771bfd100a8fa4e435095ece9c02efd5de58d60c0a012b767cb68b358a9d84",
+            "phrasedml-1.3.0.dist-info/top_level.txt": "1e7598cf6617291c0de520aec12c648a2a0d33cfaff14292c06235e741b10a40",
+            "phrasedml/__init__.py": "32f0251d6b8cfe98a1f304f57ff5ebeeb8afddced4836002c8373aa01743547c",
+            "phrasedml/libphrasedml.so": "f39b7b1e4fe383a9f75bc5b35d57f668ef76deb68050680a97a027cda1bc539b",
+            "phrasedml/phrasedml.py": "04e9caf735f9d88aab7dd4b42046536d8b467a97938d108e2517ad4af8e08a5e"
+          }
+        }
+      ],
+      "filename": "phrasedml-1.3.0-py3-none-manylinux2014_x86_64.whl",
+      "sha256": "b0e7e58cb84377d9f021c335dd2bd44a6a1e608c8f3b779a1b511d6ea2961ce6",
+      "url": "https://files.pythonhosted.org/packages/de/42/9d13afe8381bec1bd6c1096feacab3994992849e1f19103e05823e55b6bf/phrasedml-1.3.0-py3-none-manylinux2014_x86_64.whl"
+    }
+  }
+}

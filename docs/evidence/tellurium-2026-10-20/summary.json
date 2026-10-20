@@ -1,0 +1,72 @@
+{
+  "authorization_boundaries": {
+    "artifact_hosting_or_publication": false,
+    "cloud_build_or_job": false,
+    "deployment": false,
+    "production_action_by_this_work": false,
+    "pushed": false
+  },
+  "backend": {
+    "baseline_commit": "76262ee56f87de20c23f06a22db72db07a0b6a7e",
+    "divergence": "local ahead 1, behind 1; external remote update, no merge or push by this work",
+    "implementation_commit": "3cbf2229560667a2d8a939760af3bc81ee3497fb",
+    "main_baseline": "afa433d9c894b46781556ac4061b68e81647e90b",
+    "observed_origin_staging": "f33faf79a89cc43d6d71332f2b3eefbe47e2e6a2"
+  },
+  "cleanup": {
+    "cloud_resources_created": false,
+    "dedicated_images_removed": true,
+    "docker_shared_build_cache": "ordinary shared Docker build cache retained; no global cache prune",
+    "named_containers_removed": true,
+    "original_negative_candidate_environments_removed": true,
+    "qualified_artifact_bundle_retained": ".local-artifacts/tellurium-2026-10-20",
+    "temporary_installer_caches_removed": true
+  },
+  "date": "2026-10-20",
+  "environment": {
+    "docker_base_manifest": "sha256:afc139a0a640942491ec481ad8dda10f2c5b753f5c969393b12480155fe15a63",
+    "docker_image": "sha256:ee214ca8ed584296e2250d6b5d763c1462b37b220d68581dee56116a44750956",
+    "glibc": "2.36",
+    "host": "macOS arm64 / OrbStack Linux x86_64 emulation",
+    "python": "3.12.3",
+    "uv": "0.13.4"
+  },
+  "limits": [
+    "Koo2013 exact source lab absent: snapshot comparison blocked",
+    "canonical Tellurium checkpoint continuation unsupported and unchanged",
+    "CPython3.11 wheels generated but not execution-qualified",
+    "other Python/platform combinations untested; no manylinux certification",
+    "default cloud installations unchanged; no provider image build, deployment or end-to-end staging test"
+  ],
+  "results": {
+    "backend_contract_tests_passed": 67,
+    "candidate_managed_uv_check": 0,
+    "conflicting_pin": 1,
+    "host_coverage_percent": 82.75,
+    "host_coverage_required_percent": 82,
+    "host_full_suite_collected": 805,
+    "host_full_suite_passed_skipped_split": "successful hook suppresses pytest output; split not retained",
+    "host_required_commit_hook_exit_code": 0,
+    "installed_wheel_science_passed": 5,
+    "local_linux_runtime_regressions_passed": 57,
+    "missing_dependencies_check": 1,
+    "original_install": 0,
+    "original_model_classification": "partial reproduction",
+    "original_uv_check": 1,
+    "preserved_roadrunner_tests_passed": 7,
+    "source_sbml_and_science_passed": 20,
+    "wrong_architecture": 2
+  },
+  "rollback": "Prior scientific and deployed environments were not replaced; retain baseline commits and original upstream wheels. Remove local opt-in and revert focused commits if needed. Integrate and retest external backend staging changes before considering a separately approved push.",
+  "runtime": {
+    "baseline_commit": "56ed685dd060013e58d4a2dba99f3dcb5ea64811",
+    "implementation_commit": "5f5fa09e7d02b799fd0257c794a5b796663764a6",
+    "main_baseline": "28f572be47db030a3894d6efe4e0c2289e2dd8fe"
+  },
+  "runtime_wheel": {
+    "filename": "biosimulant-0.0.37-py3-none-any.whl",
+    "installed_product_members_match_staging_source": true,
+    "sha256": "416e90d566180b1e89ce2bdd258d920174fb37612c05bcd6b38965388149072d"
+  },
+  "scope": "local Docker qualification and staging commits only"
+}

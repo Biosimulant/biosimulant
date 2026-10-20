@@ -1,0 +1,5 @@
+	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007ffffe8e5000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007ffffe806000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007ffffe7e6000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007ffffe605000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007ffffffcc000)

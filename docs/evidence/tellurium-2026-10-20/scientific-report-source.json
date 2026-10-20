@@ -1,0 +1,428 @@
+{
+  "checks": {
+    "finite": true,
+    "nonnegative": true,
+    "numerical": true,
+    "reference": true,
+    "sustained": true
+  },
+  "classification": "partial reproduction",
+  "classification_reason": "Figure initial state and raw trajectories are unavailable. Coarse figure agreement cannot establish exact waveform reproduction.",
+  "figure_comparison": [
+    {
+      "amplitude_point_relative_error": 0.008082990478868401,
+      "amplitude_uncertainty_status": "indeterminate",
+      "period_point_relative_error": 0.1046128403660711,
+      "period_uncertainty_status": "indeterminate",
+      "phase_spacing_error_cycles": 0.0,
+      "protein": "LacI"
+    },
+    {
+      "amplitude_point_relative_error": 0.008082995686084393,
+      "amplitude_uncertainty_status": "indeterminate",
+      "period_point_relative_error": 0.10461281204620398,
+      "period_uncertainty_status": "indeterminate",
+      "phase_spacing_error_cycles": 5.5664008846711965e-08,
+      "protein": "TetR"
+    },
+    {
+      "amplitude_point_relative_error": 0.008083048472097287,
+      "amplitude_uncertainty_status": "indeterminate",
+      "period_point_relative_error": 0.10461295647610147,
+      "period_uncertainty_status": "indeterminate",
+      "phase_spacing_error_cycles": 9.819483304251975e-08,
+      "protein": "cI"
+    }
+  ],
+  "metrics": {
+    "primary": [
+      {
+        "amplitude_copies_per_cell": 2318.5908781013973,
+        "amplitude_drift_fraction": 1.0267920441353576e-06,
+        "complete_cycles": 7,
+        "peak_times_min": [
+          1117.8482619949689,
+          1243.2021849165696,
+          1368.5566389707935,
+          1493.9108413195436,
+          1619.2646146765412,
+          1744.6190177314443,
+          1869.973350014959,
+          1995.3273290223665
+        ],
+        "peak_values_copies_per_cell": [
+          2368.6378382336125,
+          2368.640983348149,
+          2368.6404611078297,
+          2368.6391588077354,
+          2368.637867234333,
+          2368.6408556598208,
+          2368.639778866209,
+          2368.6383505901117
+        ],
+        "period_min": 125.35420234875005,
+        "phase_from_LacI_cycles": 0.0,
+        "protein": "LacI"
+      },
+      {
+        "amplitude_copies_per_cell": 2318.590890077994,
+        "amplitude_drift_fraction": 1.0651433867860237e-06,
+        "complete_cycles": 7,
+        "peak_times_min": [
+          1076.063600608819,
+          1201.4178069223503,
+          1326.7716027472145,
+          1452.1259605893413,
+          1577.4803052625984,
+          1702.8343051310242,
+          1828.188304146127,
+          1953.542742802893
+        ],
+        "peak_values_copies_per_cell": [
+          2368.639254899509,
+          2368.6390169578203,
+          2368.637875974902,
+          2368.6408816401913,
+          2368.6398431785697,
+          2368.6384133682595,
+          2368.6410822864127,
+          2368.6403781839776
+        ],
+        "period_min": 125.35420631353145,
+        "phase_from_LacI_cycles": 0.6666667223306755,
+        "protein": "TetR"
+      },
+      {
+        "amplitude_copies_per_cell": 2318.591011485824,
+        "amplitude_drift_fraction": 1.1785911654046715e-06,
+        "complete_cycles": 7,
+        "peak_times_min": [
+          1034.2786154885805,
+          1159.632907433251,
+          1284.9872604656152,
+          1410.3412801765417,
+          1535.6952439617958,
+          1661.0496910707368,
+          1786.4038771640826,
+          1911.7576256337693
+        ],
+        "peak_values_copies_per_cell": [
+          2368.635652589812,
+          2368.6405280295053,
+          2368.6398427284844,
+          2368.638466680134,
+          2368.6410915640954,
+          2368.6404302113197,
+          2368.6390919104233,
+          2368.6378260731367
+        ],
+        "period_min": 125.35418609334579,
+        "phase_from_LacI_cycles": 0.3333332351385003,
+        "protein": "cI"
+      }
+    ],
+    "reference": [
+      {
+        "amplitude_copies_per_cell": 2318.590872515505,
+        "amplitude_drift_fraction": 1.0267795809203418e-06,
+        "complete_cycles": 7,
+        "peak_times_min": [
+          1117.8482618601588,
+          1243.2021847948747,
+          1368.5566388657123,
+          1493.9108412304308,
+          1619.2646146206362,
+          1744.6190176812793,
+          1869.9733499831684,
+          1995.3273290180678
+        ],
+        "peak_values_copies_per_cell": [
+          2368.637832932494,
+          2368.640977492252,
+          2368.640455828645,
+          2368.6391529140924,
+          2368.6378620516048,
+          2368.640849707413,
+          2368.639773697603,
+          2368.6383447102025
+        ],
+        "period_min": 125.3542023647185,
+        "phase_from_LacI_cycles": 0.0,
+        "protein": "LacI"
+      },
+      {
+        "amplitude_copies_per_cell": 2318.590884465774,
+        "amplitude_drift_fraction": 1.0651839141299534e-06,
+        "complete_cycles": 7,
+        "peak_times_min": [
+          1076.0636004688206,
+          1201.417806789722,
+          1326.7716026308437,
+          1452.1259605029484,
+          1577.4803051897843,
+          1702.834305072829,
+          1828.1883041092476,
+          1953.542742795846
+        ],
+        "peak_values_copies_per_cell": [
+          2368.6392496907333,
+          2368.639010995929,
+          2368.6378706838773,
+          2368.640875737453,
+          2368.639837807152,
+          2368.6384075883184,
+          2368.6410768810115,
+          2368.640372517389
+        ],
+        "period_min": 125.35420632090131,
+        "phase_from_LacI_cycles": 0.6666667223072826,
+        "protein": "TetR"
+      },
+      {
+        "amplitude_copies_per_cell": 2318.591005889745,
+        "amplitude_drift_fraction": 1.1786144313358517e-06,
+        "complete_cycles": 7,
+        "peak_times_min": [
+          1034.2786153286804,
+          1159.6329072961535,
+          1284.9872603511874,
+          1410.3412800816452,
+          1535.6952438748629,
+          1661.049691013258,
+          1786.4038771242328,
+          1911.7576256106738
+        ],
+        "peak_values_copies_per_cell": [
+          2368.6356471529193,
+          2368.640522355828,
+          2368.639837249437,
+          2368.6384610465107,
+          2368.6410859263488,
+          2368.6404248415884,
+          2368.6390861289974,
+          2368.637820783668
+        ],
+        "period_min": 125.35418611097475,
+        "phase_from_LacI_cycles": 0.3333332351453227,
+        "protein": "cI"
+      }
+    ],
+    "tighter": [
+      {
+        "amplitude_copies_per_cell": 2318.590878101206,
+        "amplitude_drift_fraction": 1.026792165344348e-06,
+        "complete_cycles": 7,
+        "peak_times_min": [
+          1117.8482619971203,
+          1243.2021849182759,
+          1368.5566389726575,
+          1493.9108413213507,
+          1619.2646146787686,
+          1744.6190177336073,
+          1869.973350016991,
+          1995.327329024168
+        ],
+        "peak_values_copies_per_cell": [
+          2368.637838235905,
+          2368.6409833492685,
+          2368.6404611066205,
+          2368.639158806509,
+          2368.637867234922,
+          2368.640855658841,
+          2368.639778866265,
+          2368.6383505893705
+        ],
+        "period_min": 125.3542023486932,
+        "phase_from_LacI_cycles": 0.0,
+        "protein": "LacI"
+      },
+      {
+        "amplitude_copies_per_cell": 2318.5908900784793,
+        "amplitude_drift_fraction": 1.0651438310223215e-06,
+        "complete_cycles": 7,
+        "peak_times_min": [
+          1076.0636006109298,
+          1201.4178069243574,
+          1326.7716027490098,
+          1452.1259605913885,
+          1577.4803052645184,
+          1702.8343051328711,
+          1828.1883041478688,
+          1953.5427428046753
+        ],
+        "peak_values_copies_per_cell": [
+          2368.63925489988,
+          2368.639016959702,
+          2368.6378759746044,
+          2368.640881641465,
+          2368.6398431805196,
+          2368.6384133668794,
+          2368.6410822875578,
+          2368.6403781864674
+        ],
+        "period_min": 125.35420631342754,
+        "phase_from_LacI_cycles": 0.6666667223299376,
+        "protein": "TetR"
+      },
+      {
+        "amplitude_copies_per_cell": 2318.5910114856833,
+        "amplitude_drift_fraction": 1.1785910791071452e-06,
+        "complete_cycles": 7,
+        "peak_times_min": [
+          1034.2786154908745,
+          1159.6329074351904,
+          1284.9872604677114,
+          1410.3412801781326,
+          1535.6952439638042,
+          1661.0496910725694,
+          1786.4038771660103,
+          1911.7576256354118
+        ],
+        "peak_values_copies_per_cell": [
+          2368.6356525912015,
+          2368.6405280286067,
+          2368.6398427295185,
+          2368.6384666789763,
+          2368.641091564444,
+          2368.6404302110454,
+          2368.639091910444,
+          2368.6378260742295
+        ],
+        "period_min": 125.35418609344083,
+        "phase_from_LacI_cycles": 0.3333332351377187,
+        "protein": "cI"
+      }
+    ]
+  },
+  "numerical_comparison": [
+    {
+      "amplitude_relative_error": 8.260059303211165e-14,
+      "passed": true,
+      "period_relative_error": 4.5341508325691393e-13,
+      "phase_error_cycles": 0.0,
+      "protein": "LacI",
+      "trajectory_max_normalized_error": 8.457223902513801e-11,
+      "trajectory_nrmse": 4.0163971570247857e-11
+    },
+    {
+      "amplitude_relative_error": 2.091660178393795e-13,
+      "passed": true,
+      "period_relative_error": 8.288925101851419e-13,
+      "phase_error_cycles": 7.37854222165879e-13,
+      "protein": "TetR",
+      "trajectory_max_normalized_error": 8.456282430440242e-11,
+      "trajectory_nrmse": 4.025751196930463e-11
+    },
+    {
+      "amplitude_relative_error": 6.061817714453355e-14,
+      "passed": true,
+      "period_relative_error": 7.582823258189819e-13,
+      "phase_error_cycles": 7.815970093361102e-13,
+      "protein": "cI",
+      "trajectory_max_normalized_error": 8.459743698099994e-11,
+      "trajectory_nrmse": 4.025226296295523e-11
+    }
+  ],
+  "qualification": {
+    "adapter_solver": {
+      "absolute_tolerance": 1e-11,
+      "maximum_time_step_min": 0.5,
+      "method": "cvode",
+      "relative_tolerance": 1e-09
+    },
+    "canonical_checkpoint_continuation_supported": false,
+    "distributions": {
+      "antimony": "3.2.0",
+      "libroadrunner": "2.8.0",
+      "numpy": "2.2.6",
+      "phrasedml": "1.3.0",
+      "scipy": "1.15.3",
+      "tellurium": "2.2.11.2"
+    },
+    "platform": "Linux-7.0.14-orbstack-00380-ga7e0a2dc9535-x86_64-with-glibc2.36",
+    "python": "3.12.3 (main, May 14 2024, 07:34:56) [GCC 12.2.0]",
+    "reference_role": "The unchanged SBML executed through Tellurium is supplied as the reference; the preserved protocol computes independent DOP853 and tighter Radau trajectories.",
+    "runtime_import": "/work/biosim/src/biosim/__init__.py",
+    "scope": "local scientific adapter qualification; not deployment evidence",
+    "sha256": {
+      "examples/labs/repressilator-reproduction/MRS.md": "54ef5a4d835ff0b0537c993a18e6aa57724a7b1acc6ba46e97d4c32edd2c4e14",
+      "examples/labs/repressilator-reproduction/MTS.md": "06a9e870ccc2875f5b783a67ad7d71f829213637e2f068e88e3f32ec66f4cc54",
+      "examples/labs/repressilator-reproduction/evidence/BIOMD0000000012_url.xml": "d535c84bc5fe68b01728cac5c53f8fed971176e3f0f2367a9ba1e9c043b11a2d",
+      "examples/labs/repressilator-reproduction/models/comparison/src/core.py": "f4c77419d529a6c21d98e1f9ab372c78a665e4bc7e0797ec62b78caeca5e77af"
+    }
+  },
+  "reference_comparison": [
+    {
+      "amplitude_relative_error": 2.4091755257416025e-09,
+      "passed": true,
+      "period_relative_error": 1.2738665677858307e-10,
+      "phase_error_cycles": 0.0,
+      "protein": "LacI",
+      "trajectory_max_normalized_error": 1.1568062848622735e-08,
+      "trajectory_nrmse": 4.222397863174801e-09
+    },
+    {
+      "amplitude_relative_error": 2.4205306647928637e-09,
+      "passed": true,
+      "period_relative_error": 5.879230435823501e-11,
+      "phase_error_cycles": 2.3392843218061898e-11,
+      "protein": "TetR",
+      "trajectory_max_normalized_error": 1.1761748637609458e-08,
+      "trajectory_nrmse": 4.269539762657867e-09
+    },
+    {
+      "amplitude_relative_error": 2.4135689002946492e-09,
+      "passed": true,
+      "period_relative_error": 1.4063317177459567e-10,
+      "phase_error_cycles": 6.8224315086240495e-12,
+      "protein": "cI",
+      "trajectory_max_normalized_error": 1.176947920770447e-08,
+      "trajectory_nrmse": 4.146358657384588e-09
+    }
+  ],
+  "settings": {
+    "duration_min": 2000.0,
+    "evaluation_window_min": [
+      1000.0,
+      2000.0
+    ],
+    "initial_state": [
+      0.0,
+      20.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "primary": {
+      "atol": 1e-11,
+      "max_step_min": 0.5,
+      "method": "DOP853",
+      "rtol": 1e-09
+    },
+    "sampling_min": 0.5,
+    "species": [
+      "X",
+      "Y",
+      "Z",
+      "PX",
+      "PY",
+      "PZ"
+    ],
+    "tighter": {
+      "atol": 1e-13,
+      "max_step_min": 0.25,
+      "method": "Radau",
+      "rtol": 1e-11
+    },
+    "time_origin_shift_min": 0.0
+  },
+  "units": {
+    "amplitude": "copies/cell",
+    "period": "min",
+    "phase": "cycle",
+    "relative_errors": "1",
+    "states": "copies/cell",
+    "time": "min"
+  }
+}
