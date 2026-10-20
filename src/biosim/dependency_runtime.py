@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import importlib.metadata as metadata
+import json
 import os
 import platform
 import queue
+import re
 import signal
 import subprocess
 import sys
@@ -23,6 +25,12 @@ from packaging.version import InvalidVersion, Version
 
 from .__about__ import __version__
 from ._errors import PackageError
+
+
+def _redact_dependency_line(line: str) -> str:
+    # Installer output can repeat authenticated index URLs and query tokens.
+    line = re.sub(r"(https?://)[^\s/@]+(?::[^\s/@]*)?@", r"\1[redacted]@", line)
+    return re.sub(r"(https?://[^\s?#]+)[?#][^\s]+", r"\1?[redacted]", line)
 
 
 def collect_requirements(
@@ -191,9 +199,9 @@ def run_dependency_command(
                 if line is None:
                     break
                 lines.append(line)
-                recent.append(line.rstrip())
+                recent.append(_redact_dependency_line(line.rstrip()))
                 if dependency_logger is not None:
-                    dependency_logger(line.rstrip())
+                    dependency_logger(_redact_dependency_line(line.rstrip()))
             returncode = process.wait()
         finally:
             terminate_process(process)
@@ -246,10 +254,45 @@ def isolated_environment(
         run_dependency_command([*uv, "venv", "--python", str(python), str(root)], **callbacks)
         executable = _venv_python_path(root)
         source = _local_source_spec() or f"biosimulant=={__version__}"
+        from .tellurium_artifacts import WHEELHOUSE_ENV, artifact_requirements, requests_candidate
+        artifacts: list[str] = []
+        wheelhouse = os.environ.get(WHEELHOUSE_ENV)
+        if wheelhouse and requests_candidate(requirements):
+            target = json.loads(run_dependency_command([
+                str(executable), "-c", "import json,platform,sys;print(json.dumps(dict("
+                "python_version=f'{sys.version_info.major}.{sys.version_info.minor}',"
+                "python_full_version=platform.python_version(),"
+                "sys_platform=sys.platform,machine=platform.machine(),implementation=sys.implementation.name)))",
+            ], **callbacks))
+            artifacts = artifact_requirements(requirements, Path(wheelhouse), **target)
         # A single solve includes the runtime and every model's direct/transitive requirements.
         run_dependency_command(
-            [*uv, "pip", "install", "--python", str(executable), source, *requirements],
+            [*uv, "pip", "install", "--python", str(executable), source, *requirements, *artifacts],
             **callbacks,
         )
-        run_dependency_command([*uv, "pip", "check", "--python", str(executable)], **callbacks)
+        try:
+            run_dependency_command([*uv, "pip", "check", "--python", str(executable)], **callbacks)
+        except PackageError as exc:
+            # Collect evidence before TemporaryDirectory removes the failed env.
+            # Keep this best-effort, bounded, and cancellable like installation.
+            details = []
+            diagnostic_callbacks = {**callbacks, "dependency_logger": None}
+            for label, command in [
+                ("installer", [*uv, "--version"]),
+                ("interpreter", [str(executable), "-c",
+                    "import platform,sys;print(sys.version);print(platform.platform());print(platform.machine())"]),
+                ("resolved packages", [*uv, "pip", "freeze", "--python", str(executable)]),
+                ("wheel tags", [str(executable), "-c",
+                    "import importlib.metadata as m; "
+                    "print('\\n'.join(d.metadata['Name']+'=='+d.version+' '+"
+                    "str(d.read_text('WHEEL')) for d in m.distributions() "
+                    "if d.metadata['Name'].lower() in {'antimony','phrasedml'}))"]),
+            ]:
+                try:
+                    output = run_dependency_command(command, **diagnostic_callbacks)
+                    details.append(label + ": " + _redact_dependency_line(output[-6000:]))
+                except PackageError:
+                    details.append(label + ": unavailable")
+            raise PackageError("Dependency validation failed after installation.\n" + str(exc)
+                               + "\n" + "\n".join(details)) from exc
         yield executable
