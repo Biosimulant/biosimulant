@@ -76,6 +76,10 @@ class _RuntimeWorld:
     # The real world carries these too, and serve records both in run results.
     module_names = ("counter",)
     compatibility = _RuntimeCompatibility()
+    execution_policies = {"counter": "each_window"}
+
+    def execution_outcome(self):
+        return {"schema_version": "1", "state": "completed", "components": []}
 
     def __init__(self) -> None:
         self._listeners: list[object] = []
@@ -827,6 +831,48 @@ def test_completed_run_history_persists_across_session_restart(
     assert results["data"]["results"]["duration"] == 0.1
     logs = restarted_client.get(f"/api/runs/{run_id}/logs").json()["data"]["logs"]
     assert any(entry["message"] == "Run completed" for entry in logs)
+
+
+@pytest.mark.parametrize("outcome_state", ["completed", "partial", "failed"])
+def test_cli_and_ui_retain_adapter_outcomes_after_restart(tmp_path, capsys, outcome_state):
+    from biosim.__main__ import main
+
+    lab = _write_lab(tmp_path / "lab")
+    model_path = lab / "models" / "counter" / "src" / "counter.py"
+    source = model_path.read_text()
+    source = "from biosim import ExecutionOutcome\n" + source
+    error = None if outcome_state == "completed" else {"message": "Retained child diagnostics"}
+    source = source.replace(
+        "self.value += self.step",
+        "self.value += self.step\n"
+        f"        self.report_execution_outcome(ExecutionOutcome({outcome_state!r}, "
+        f"stage='annotation', error={error!r}))",
+    )
+    model_path.write_text(source)
+    results_path = tmp_path / "cli-results.json"
+    main([
+        "labs", "run", str(lab), "--no-install-deps", "--json",
+        "--results-file", str(results_path),
+    ], prog="biosimulant")
+    capsys.readouterr()
+    cli_results = json.loads(results_path.read_text())
+    assert cli_results["execution"]["outcome"]["state"] == outcome_state
+
+    client, session = _client(lab)
+    _mark_runtime_metadata_ready(session)
+    created = client.post("/api/runs", json={}).json()
+    run_id = created["data"]["run"]["id"]
+    run = session.get_run(run_id)
+    run.thread.join(timeout=10)
+    assert not run.thread.is_alive()
+    assert run.status == "completed", run.error_message
+    assert run.world is None
+
+    restarted_client, _ = _client(lab)
+    results = restarted_client.get(f"/api/runs/{run_id}/results").json()["data"]["results"]
+    assert results["execution"] == cli_results["execution"]
+    assert results["outputs"] == cli_results["outputs"]
+    assert results["outputs"]["counter"]["count"]["value"] > 0
 
 
 def test_failed_run_history_persists_across_session_restart(

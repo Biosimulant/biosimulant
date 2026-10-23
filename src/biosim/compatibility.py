@@ -12,6 +12,8 @@ from pathlib import Path
 import stat
 from typing import Any, Callable, Iterable, Literal, Mapping, TypeAlias
 
+from ._legacy_profile_digests import LEGACY_PROFILE_DIGESTS
+
 try:
     from biosimulant_model_compatibility_standard import (
         CATALOGUE_SHA256, CATALOGUE_VERSION, STANDARD_ID, STANDARD_VERSION,
@@ -34,11 +36,9 @@ except ImportError:
         raise KeyError(ref)
 
 
-def _legacy_profile_digest(ref):
-    try:
-        return profile_digest(ref)
-    except KeyError:
-        return None
+def _legacy_profile_digest(ref: str) -> str | None:
+    # Persisted envelope identity must not depend on optional installed metadata.
+    return LEGACY_PROFILE_DIGESTS.get(ref)
 
 
 from .__about__ import __version__

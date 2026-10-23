@@ -83,8 +83,18 @@ docker run --rm --platform linux/amd64 \
   -v /tmp/bsim-tellurium-local-qualification:/qualification \
   -e UV_CACHE_DIR=/qualification/uv-cache \
   bsim-tellurium-qualification:local sh -c \
-  'python -m uv pip install --system /qualification/dist/biosimulant-0.0.37-py3-none-any.whl && python scripts/qualify_tellurium_wheelhouse.py --wheelhouse /qualification/wheelhouse --runtime-wheel /qualification/dist/biosimulant-0.0.37-py3-none-any.whl --source-root /work/biosim --evidence-dir /qualification/evidence-py312'
+  'set -eu
+   set -- /qualification/dist/biosimulant-*.whl
+   [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "Expected exactly one freshly built runtime wheel" >&2; exit 1; }
+   runtime_wheel="$1"
+   python -m uv pip install --system "$runtime_wheel"
+   python scripts/qualify_tellurium_wheelhouse.py --wheelhouse /qualification/wheelhouse --runtime-wheel "$runtime_wheel" --source-root /work/biosim --evidence-dir /qualification/evidence-py312'
 ```
+
+The runtime wheel is selected from the new disposable output directory, so these
+commands follow the current checkout's version. The retained `0.0.37` wheel and
+its checksum in the historical qualification report identify that earlier
+candidate; they are not the filename of a newly built runtime.
 
 The driver separates original preparation, negative checks, corrected managed
 preparation, installed-wheel science, source science, runtime regressions and

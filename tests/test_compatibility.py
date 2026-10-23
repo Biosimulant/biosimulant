@@ -126,12 +126,17 @@ def test_contract_digest_qualifies_profile_definition_and_context() -> None:
         envelope.validate_contract(SEQUENCE)
 
 
-def test_provenance_contains_only_profiles_used_by_manifest() -> None:
+@pytest.mark.parametrize("catalogue_version", [None, "0.1.0"])
+def test_provenance_contains_only_profiles_used_by_manifest(monkeypatch, catalogue_version) -> None:
+    catalogue_sha256 = None if catalogue_version is None else "sha256:" + "a" * 64
+    monkeypatch.setattr(compatibility_module, "CATALOGUE_VERSION", catalogue_version)
+    monkeypatch.setattr(compatibility_module, "CATALOGUE_SHA256", catalogue_sha256)
     manifest = _manifest(contract=SEQUENCE)
     provenance = compatibility_provenance(manifest)
     assert provenance["standard"] == "biosimulant.model-compatibility"
     assert provenance["version"] == "0"
-    assert provenance["catalogue_version"] == "0.1.0"
+    assert provenance["catalogue_version"] == catalogue_version
+    assert provenance["catalogue_sha256"] == catalogue_sha256
     assert [item["ref"] for item in provenance["profiles"]] == ["protein.sequence/v1"]
     assert compatibility_provenance(_manifest(contract=None)) is None
 
