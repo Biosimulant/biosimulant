@@ -1,0 +1,6 @@
+Using Python 3.12.3 environment at: /tmp/bsim-tellurium-negative-69csof68/env
+Resolved 2 packages in 50ms
+error: Failed to determine installation plan
+  cause: A path (/qualification/wheelhouse/phrasedml-1.3.0-1bsim1-cp312-none-linux_x86_64.whl) dependency is incompatible with the current platform
+
+hint: The wheel is compatible with Linux (`linux_x86_64`), but you're on Linux (`manylinux_2_28_aarch64`)

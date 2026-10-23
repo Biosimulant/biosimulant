@@ -1,0 +1,12 @@
+test_negative_missing_and_bad_method_inputs (test_comparison.ComparisonTests.test_negative_missing_and_bad_method_inputs) ... ok
+test_physical_equations_and_rescaling (test_comparison.ComparisonTests.test_physical_equations_and_rescaling) ... ok
+test_port_policy_and_visual_agree_with_saved_values (test_comparison.ComparisonTests.test_port_policy_and_visual_agree_with_saved_values) ... ok
+test_solver_robustness_and_computed_metrics (test_comparison.ComparisonTests.test_solver_robustness_and_computed_metrics) ... ok
+test_canonical_execute_and_time_boundary (test_reference.ReferenceTests.test_canonical_execute_and_time_boundary) ... ok
+test_nonzero_checkpoint_continuation (test_reference.ReferenceTests.test_nonzero_checkpoint_continuation) ... ok
+test_source_identity_and_initial_state (test_reference.ReferenceTests.test_source_identity_and_initial_state) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 23.321s
+
+OK

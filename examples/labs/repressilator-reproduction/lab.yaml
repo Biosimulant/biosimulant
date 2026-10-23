@@ -1,0 +1,62 @@
+{
+  "schema_version": "2.0",
+  "package": "repressilator-deterministic-reproduction",
+  "version": "0.1.0",
+  "title": "Goal: **Problem statement: Reproducing the repressilator’s deterministic oscillations**…",
+  "description": "Six-equation deterministic repressilator reproduction with unmodified SBML reference, independent solvers, typed trajectory comparisons, executable checks and computed protein time-series visualization. Figure raw data and initialization are unavailable; exact waveform claims are limited.",
+  "models": [
+    {
+      "path": "models/reference",
+      "alias": "reference"
+    },
+    {
+      "path": "models/comparison",
+      "alias": "comparison"
+    }
+  ],
+  "wiring": [
+    {
+      "from": "reference.trajectory",
+      "to": [
+        "comparison.reference"
+      ]
+    }
+  ],
+  "runtime": {
+    "duration": 2000,
+    "communication_step": 2000,
+    "initial_inputs": {},
+    "settle_steps": 0
+  },
+  "intended_use": {
+    "statement": "Deterministic reproduction of Elowitz & Leibler (2000), Figure 1c left, evaluated with the exact curated BioModels reference; research use only."
+  },
+  "caveats": [
+    "Scientific acceptance has not been established. Numerical tests have not yet executed.",
+    "The paper figure initial conditions/raw trajectories are unavailable; exact waveform and absolute-phase claims are unsupported.",
+    "Curated source explanatory notes contain inconsistencies; executable rules and unchanged source bytes are retained.",
+    "Deterministic mathematical reproduction only; no stochastic or experimental bacterial validation."
+  ],
+  "prohibited_claims": [
+    "No clinical or regulated use.",
+    "No claim that execution or a Passport proves biological validity.",
+    "No exact pointwise figure reproduction without adequate figure evidence."
+  ],
+  "hardware": {
+    "compute": {
+      "device": "cpu",
+      "cpu_cores": 1,
+      "memory_mb": 1024
+    }
+  },
+  "visualization": {
+    "schema_version": "1",
+    "required": [
+      {
+        "module": "comparison",
+        "render": "timeseries",
+        "min_count": 1
+      }
+    ]
+  }
+}

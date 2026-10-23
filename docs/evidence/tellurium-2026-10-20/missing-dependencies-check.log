@@ -1,0 +1,12 @@
+Using Python 3.12.3 environment at: /tmp/bsim-tellurium-negative-69csof68/env
+Checked 1 package in 16ms
+Found 9 incompatibilities
+The package `biosimulant` requires `argcomplete>=3.5`, but it's not installed
+The package `biosimulant` requires `biosimulant-model-compatibility-standard==0.1.0`, but it's not installed
+The package `biosimulant` requires `fastapi>=0.110,<1`, but it's not installed
+The package `biosimulant` requires `httpx>=0.26,<1`, but it's not installed
+The package `biosimulant` requires `numpy>=1.26`, but it's not installed
+The package `biosimulant` requires `packaging>=24`, but it's not installed
+The package `biosimulant` requires `pyyaml>=6`, but it's not installed
+The package `biosimulant` requires `uv>=0.5`, but it's not installed
+The package `biosimulant` requires `uvicorn>=0.23`, but it's not installed

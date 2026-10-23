@@ -1,0 +1,5 @@
+Using Python 3.12.3 environment at: /tmp/bsim-tellurium-original-rqqzbh2t/env
+Checked 79 packages in 14ms
+Found 2 incompatibilities
+The package `antimony` was built for a different platform
+The package `phrasedml` was built for a different platform

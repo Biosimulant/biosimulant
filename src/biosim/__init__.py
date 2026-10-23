@@ -7,6 +7,7 @@ import importlib
 from types import ModuleType
 
 from .__about__ import __version__
+from .execution_outcome import ExecutionOutcome
 from .world import BioWorld, WorldEvent
 from .modules import (
     BioModule,
@@ -90,6 +91,7 @@ __all__ = [
     "normalize_visuals",
     "BioModule",
     "ExecutionContext",
+    "ExecutionOutcome",
     "ExecutionPolicy",
     "SignalEmitterBioModule",
     "StatefulBioModule",

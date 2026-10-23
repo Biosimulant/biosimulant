@@ -1,0 +1,32 @@
+schema_version: "2.0"
+package: repressilator-comparison
+version: 0.1.0
+title: Deterministic Repressilator Comparison
+description: Independent six-ODE reproduction, numerical checks and comparison to the exact SBML reference.
+standard: other
+biosim:
+  entrypoint: src.comparison:RepressilatorComparison
+  communication_step: 2000
+  execution_policy: once_after_run
+runtime:
+  dependencies:
+    packages:
+      - biosimulant==0.0.37
+      - libroadrunner==2.8.0
+      - scipy==1.15.3
+      - numpy==2.2.6
+io:
+  inputs:
+    - name: reference
+      signal_type: record
+      schema: {payload: json}
+      accepted_units: [copies/cell]
+  outputs:
+    - name: trajectories
+      signal_type: record
+      schema: {payload: json}
+      emitted_unit: copies/cell
+    - name: report
+      signal_type: record
+      schema: {payload: json}
+      emitted_unit: "1"

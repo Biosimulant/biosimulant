@@ -1,0 +1,8 @@
+{
+  "source": "Elowitz & Leibler (2000), Box 1, DOI 10.1038/35002125",
+  "implementation": "Independent physical six-ODE equations; handwritten scientific logic requires review",
+  "parameter_fitting": false,
+  "evaluation_protocol": "REPR-MRS-001 v1.0.0 and REPR-MTS-001 v1.0.0",
+  "figure_readings": "SOURCE_REVIEW.md, frozen before scientific computation",
+  "license": "Original project implementation; source paper remains copyrighted"
+}

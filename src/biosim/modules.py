@@ -125,10 +125,28 @@ class BioModule(ABC):
 
         return dict(getattr(self, "_execution_outputs", {}))
 
+    def report_execution_outcome(self, outcome: Any) -> None:
+        """Report an inner computation outcome while preserving available outputs."""
+        from .execution_outcome import normalize_outcome
+
+        normalized = normalize_outcome(outcome)
+        if normalized is None:
+            raise ValueError("Expected an ExecutionOutcome or versioned outcome mapping")
+        self._execution_outcome = normalized
+
+    def get_execution_outcome(self) -> Mapping[str, Any] | None:
+        return getattr(self, "_execution_outcome", None)
+
+    def _clear_execution_outcome(self) -> None:
+        """Start a new computation attempt without changing retained outputs."""
+
+        self._execution_outcome = None
+
     def _reset_execution_adapter(self) -> None:
         """Clear adapter-owned inputs and outputs without relying on super()."""
 
         self._execution_inputs = {}
+        self._clear_execution_outcome()
         self._clear_execution_outputs()
 
     def _clear_execution_outputs(self) -> None:
@@ -172,8 +190,7 @@ class BioModule(ABC):
     def visualize(self) -> Optional["VisualSpec" | List["VisualSpec"]]:
         """Return portable VisualSpec(s) from computed state; see visualization_catalog().
 
-        Result modules normally implement this. Plumbing modules may omit it.
-        Visualization supplements, and never replaces, typed scientific outputs.
+        Modules may omit visualizations, including file-only computations.
         """
         return None
 

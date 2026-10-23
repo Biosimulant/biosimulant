@@ -26,7 +26,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from biosim.execution import unknown_lab_execution
+from biosim.execution import describe_lab_execution, unknown_lab_execution
 from biosim.pack import (
     PackageError,
     _local_lab_release_identity,
@@ -1570,6 +1570,10 @@ class LabServeSession:
                             "duration": prepared.duration,
                             "communication_step": prepared.communication_step,
                             "settle_steps": prepared.settle_steps,
+                            "execution": {
+                                **describe_lab_execution(world.execution_policies).to_dict(),
+                                "outcome": world.execution_outcome(),
+                            },
                             "modules": prepared.modules,
                             "compatibility": world.compatibility.to_dict(),
                         }

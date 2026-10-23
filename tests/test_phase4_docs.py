@@ -39,6 +39,7 @@ TEMPORAL_COMPATIBILITY_REFERENCE_ALLOWLIST = {
     ROOT / "tests" / "test_phase2_cli.py",
     ROOT / "tests" / "test_ports_validation.py",
     ROOT / "tests" / "test_sbml_contrib.py",
+    ROOT / "tests" / "test_tellurium_qualification.py",
     ROOT / "tests" / "test_snapshot_biomodule_outputs.py",
     ROOT / "tests" / "test_visuals.py",
     ROOT / "tests" / "test_wiring_builder.py",

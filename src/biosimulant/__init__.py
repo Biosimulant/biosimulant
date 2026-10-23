@@ -35,6 +35,7 @@ _ALIASED_SUBMODULES = (
     "contrib.sbml",
     "credentials",
     "execution_recorder",
+    "execution_outcome",
     "hub",
     "modules",
     "onnx",

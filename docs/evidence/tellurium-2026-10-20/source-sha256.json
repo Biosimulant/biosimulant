@@ -1,0 +1,11 @@
+{
+  "scripts/prepare_tellurium_wheelhouse.py": "0561afc72d958963cc9f92e03da18158be1fcf22c3c55f0933a4155feae57d6e",
+  "scripts/qualify_tellurium_wheelhouse.py": "b8d1e62fe845bc7bd8bc0954285bfde451d955ad7e1a68cba33ba46968ce428c",
+  "scripts/tellurium-qualification.Dockerfile": "ff0561c53912a1dc0009a045d098acc7e05607dff7fd5ec4dedda0acc594c2c8",
+  "src/biosim/dependency_runtime.py": "6de805bc1899d1bc3b2c0871470a6656c64c40c2ef2e2b671ecf8a6abb5cfa1a",
+  "src/biosim/tellurium_artifacts.py": "7fd33cbaab731e0164b821e3ae61bb2de626b9b609719da6077088fc8de35e18",
+  "tests/test_dependency_diagnostics.py": "81867b6ee89e934d94333a0be71fa2be12859df9d6dc1322f95f9df5dabd59f2",
+  "tests/test_phase4_docs.py": "9215dc047c6a85e908ebaad64df4981570586891f5e1f9291d2e827826461666",
+  "tests/test_tellurium_artifacts.py": "0abed80f60cc3f1a2b62091a4b4fc707ef14349a5ca0e2e22b7e198f7a562a81",
+  "tests/test_tellurium_qualification.py": "5213a5c1a91984bc5e4f6a13f988ace0f7f62f095cfb7a39e2c4e19db666da8e"
+}

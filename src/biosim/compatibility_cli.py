@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 from typing import Any, Mapping
 
-from biosimulant_model_compatibility_standard import (
+from .compatibility import (
     CATALOGUE_SHA256,
     CATALOGUE_VERSION,
     STANDARD_ID,
@@ -27,7 +27,7 @@ def _json(value: Any) -> str:
 
 
 def _parser(prog: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog, description="Inspect and validate compatibility profiles.")
+    parser = argparse.ArgumentParser(prog=prog, description="Inspect legacy profile metadata and technical port compatibility.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("standard", help="Show the installed standard and catalogue release")
     commands.add_parser("profiles", help="List installed profiles")

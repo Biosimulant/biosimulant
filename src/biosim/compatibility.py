@@ -1,4 +1,4 @@
-"""Versioned scientific interface checks for Biosimulant model ports."""
+"""Structural interface checks for Biosimulant model ports."""
 
 from __future__ import annotations
 
@@ -7,21 +7,39 @@ from dataclasses import dataclass
 import hashlib
 import json
 import logging
-import math
 import os
 from pathlib import Path
 import stat
 from typing import Any, Callable, Iterable, Literal, Mapping, TypeAlias
 
-from biosimulant_model_compatibility_standard import (
-    CATALOGUE_SHA256,
-    CATALOGUE_VERSION,
-    STANDARD_ID,
-    STANDARD_VERSION,
-    get_profile,
-    list_profiles,
-    profile_digest,
-)
+from ._legacy_profile_digests import LEGACY_PROFILE_DIGESTS
+
+try:
+    from biosimulant_model_compatibility_standard import (
+        CATALOGUE_SHA256, CATALOGUE_VERSION, STANDARD_ID, STANDARD_VERSION,
+        get_profile, list_profiles, profile_digest,
+    )
+except ImportError:
+    # Historical catalogue metadata is optional and never required to execute a Lab.
+    CATALOGUE_SHA256 = None
+    CATALOGUE_VERSION = None
+    STANDARD_ID = "biosimulant.model-compatibility"
+    STANDARD_VERSION = "0"
+
+    def get_profile(ref):
+        raise KeyError(ref)
+
+    def list_profiles():
+        return []
+
+    def profile_digest(ref):
+        raise KeyError(ref)
+
+
+def _legacy_profile_digest(ref: str) -> str | None:
+    # Persisted envelope identity must not depend on optional installed metadata.
+    return LEGACY_PROFILE_DIGESTS.get(ref)
+
 
 from .__about__ import __version__
 from ._errors import PackageError
@@ -88,92 +106,27 @@ def _issue(level: IssueLevel, code: str, message: str) -> CompatibilityIssue:
     return CompatibilityIssue(level=level, code=code, message=message)
 
 
-def _profile_ref(profile: Mapping[str, Any]) -> str:
-    identity = profile["profile"]
-    return f"{identity['id']}/v{identity['version']}"
 
 
-def _profile_or_none(ref: Any) -> Mapping[str, Any] | None:
-    if not isinstance(ref, str) or not ref.strip():
-        return None
-    try:
-        return get_profile(ref)
-    except KeyError:
-        return None
 
 
 def validate_contract(contract: Mapping[str, Any] | None) -> CompatibilityResult:
-    if contract is None:
-        return CompatibilityResult()
-    if not isinstance(contract, Mapping):
-        return CompatibilityResult(
-            (_issue("blocked", "INVALID_CONTRACT", "contract must be a mapping"),)
-        )
-
-    issues: list[CompatibilityIssue] = []
-    unknown = sorted(set(contract) - _CONTRACT_FIELDS)
-    if unknown:
-        issues.append(
-            _issue(
-                "blocked",
-                "UNKNOWN_CONTRACT_FIELD",
-                "contract has unsupported field(s): " + ", ".join(unknown),
-            )
-        )
-    ref = contract.get("profile")
-    if not isinstance(ref, str) or not ref.strip():
-        issues.append(
-            _issue("blocked", "PROFILE_UNKNOWN", "contract.profile must name an exact profile")
-        )
-        return CompatibilityResult(tuple(issues))
-    profile = _profile_or_none(ref)
-    if profile is None:
-        issues.append(
-            _issue("blocked", "PROFILE_UNKNOWN", f"Compatibility profile '{ref}' is not installed.")
-        )
-        return CompatibilityResult(tuple(issues))
-
-    permitted_context = set(profile["context_fields"])
-    for field in ("species", "identifier_namespace"):
-        value = contract.get(field)
-        if field in contract and field not in permitted_context:
-            issues.append(
-                _issue(
-                    "blocked",
-                    "PROFILE_REPRESENTATION_MISMATCH",
-                    f"Profile '{ref}' does not permit contract.{field}.",
-                )
-            )
-        if value is not None and (not isinstance(value, str) or not value.strip()):
-            issues.append(
-                _issue(
-                    "blocked",
-                    "CONTEXT_MISMATCH",
-                    f"contract.{field} must be a non-empty string when supplied",
-                )
-            )
-    checker = profile["checker"]
-    if checker not in _CHECKERS:
-        issues.append(
-            _issue(
-                "blocked",
-                "CHECKER_UNAVAILABLE",
-                f"Checker '{checker}' for profile '{ref}' is unavailable.",
-            )
-        )
-    return CompatibilityResult(tuple(issues))
+    """Read legacy descriptive metadata without grading its scientific meaning."""
+    if contract is not None and not isinstance(contract, Mapping):
+        return CompatibilityResult((_issue("blocked", "INVALID_CONTRACT", "contract must be a mapping"),))
+    return CompatibilityResult()
 
 
 def contract_digest(contract: Mapping[str, Any]) -> str:
     validation = validate_contract(contract)
     if validation.status == "blocked":
         raise ValueError("invalid compatibility contract: " + "; ".join(i.message for i in validation.issues))
-    ref = str(contract["profile"])
+    ref = str(contract.get("profile") or "")
     payload = {
         "standard": STANDARD_ID,
         "version": STANDARD_VERSION,
         "profile": ref,
-        "profile_sha256": profile_digest(ref),
+        "profile_sha256": _legacy_profile_digest(ref),
         "context": {
             key: contract[key]
             for key in ("species", "identifier_namespace")
@@ -190,127 +143,14 @@ def contract_digest(contract: Mapping[str, Any]) -> str:
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
-def _port_representation(port: Mapping[str, Any], *, direction: str) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for field in ("signal_type", "dtype", "format", "value_type", "shape"):
-        if port.get(field) is not None:
-            result[field] = port[field]
-    if direction == "outputs":
-        if port.get("emitted_unit") is not None:
-            result["unit"] = port["emitted_unit"]
-    else:
-        units = port.get("accepted_units")
-        if isinstance(units, (list, tuple)) and len(units) == 1:
-            result["unit"] = units[0]
-        elif port.get("emitted_unit") is not None:
-            result["unit"] = port["emitted_unit"]
-    return result
 
 
-def _shape_allowed(actual: Any, expected: Any) -> bool:
-    if expected is None:
-        return actual is None
-    if actual is None or not isinstance(actual, (list, tuple)) or len(actual) != len(expected):
-        return False
-    return all(wanted == "*" or wanted == got for got, wanted in zip(actual, expected))
 
 
-def _representation_allowed(port: Mapping[str, Any], profile: Mapping[str, Any], *, direction: str) -> bool:
-    actual = _port_representation(port, direction=direction)
-    for representation in profile["representations"]:
-        if actual.get("signal_type") != representation.get("signal_type"):
-            continue
-        if actual.get("dtype") not in representation.get("dtypes", []):
-            continue
-        allowed_formats = representation.get("formats")
-        if allowed_formats is None:
-            if actual.get("format") is not None:
-                continue
-        elif actual.get("format") not in allowed_formats:
-            continue
-        if actual.get("value_type") != representation.get("value_type"):
-            continue
-        if actual.get("unit") != representation.get("unit"):
-            continue
-        if not _shape_allowed(actual.get("shape"), representation.get("shape")):
-            continue
-        return True
-    return False
 
 
-def _compare_context(source: Mapping[str, Any], target: Mapping[str, Any]) -> list[CompatibilityIssue]:
-    issues: list[CompatibilityIssue] = []
-    target_species = target.get("species")
-    source_species = source.get("species")
-    if target_species not in {None, "any"}:
-        if source_species in {None, "any"}:
-            issues.append(
-                _issue(
-                    "blocked",
-                    "CONTEXT_MISSING",
-                    f"The target requires species '{target_species}', but the source does not declare it.",
-                )
-            )
-        elif source_species != target_species:
-            issues.append(
-                _issue(
-                    "blocked",
-                    "CONTEXT_MISMATCH",
-                    f"The source species is '{source_species}', but the target requires '{target_species}'.",
-                )
-            )
-
-    target_namespace = target.get("identifier_namespace")
-    source_namespace = source.get("identifier_namespace")
-    if target_namespace is not None:
-        if source_namespace is None:
-            issues.append(
-                _issue(
-                    "blocked",
-                    "CONTEXT_MISSING",
-                    f"The target requires identifier namespace '{target_namespace}', but the source does not declare it.",
-                )
-            )
-        elif source_namespace != target_namespace:
-            issues.append(
-                _issue(
-                    "blocked",
-                    "CONTEXT_MISMATCH",
-                    f"The source identifier namespace is '{source_namespace}', but the target requires '{target_namespace}'.",
-                )
-            )
-    return issues
 
 
-def _run_checker(profile: Mapping[str, Any], sample: Any) -> tuple[CompatibilityIssue, ...]:
-    checker_id = str(profile["checker"])
-    checker = _CHECKERS.get(checker_id)
-    if checker is None:
-        return (
-            _issue(
-                "blocked",
-                "CHECKER_UNAVAILABLE",
-                f"Checker '{checker_id}' for profile '{_profile_ref(profile)}' is unavailable.",
-            ),
-        )
-    if sample is NO_SAMPLE:
-        return ()
-    try:
-        checked = checker(sample)
-        if isinstance(checked, CompatibilityResult):
-            return checked.issues
-        issues = tuple(checked)
-        if not all(isinstance(issue, CompatibilityIssue) for issue in issues):
-            raise TypeError("checker returned an item that is not CompatibilityIssue")
-        return issues
-    except Exception as exc:
-        return (
-            _issue(
-                "blocked",
-                "CHECKER_FAILED",
-                f"Checker '{checker_id}' failed: {exc}",
-            ),
-        )
 
 
 def check_compatibility(source: SignalSpec, target: SignalSpec, *, sample: Any = NO_SAMPLE) -> CompatibilityResult:
@@ -342,7 +182,6 @@ def check_compatibility(source: SignalSpec, target: SignalSpec, *, sample: Any =
         )
 
     target_contract = accepted.contract if accepted.contract is not None else target.contract
-    issues.extend(_contract_issues(source.contract, target_contract, sample))
     return CompatibilityResult(tuple(issues))
 
 
@@ -364,15 +203,8 @@ def effective_target_contract(source: SignalSpec, target: SignalSpec) -> Mapping
     return target.contract
 
 
-def _mode_for_contracts(
-    result: CompatibilityResult,
-    source_contract: Mapping[str, Any] | None,
-    target_contract: Mapping[str, Any] | None,
-) -> WireMode:
-    if result.status == "blocked":
-        return "blocked"
-    declared = int(source_contract is not None) + int(target_contract is not None)
-    return ("structural", "partial", "verified")[declared]
+def _mode_for_contracts(result, source_contract, target_contract) -> WireMode:
+    return "blocked" if result.status == "blocked" else "structural"
 
 
 def wire_mode(source: SignalSpec, target: SignalSpec, result: CompatibilityResult) -> WireMode:
@@ -381,81 +213,14 @@ def wire_mode(source: SignalSpec, target: SignalSpec, result: CompatibilityResul
     return _mode_for_contracts(result, source.contract, effective_target_contract(source, target))
 
 
-def _contract_issues(
-    source_contract: Mapping[str, Any] | None,
-    target_contract: Mapping[str, Any] | None,
-    sample: Any,
-) -> list[CompatibilityIssue]:
-    issues: list[CompatibilityIssue] = []
-    if source_contract is None and target_contract is None:
-        return issues
-    if source_contract is None or target_contract is None:
-        declared_contract = (
-            source_contract if source_contract is not None else target_contract
-        )
-        validation = validate_contract(declared_contract)
-        issues.extend(validation.issues)
-        if validation.status == "blocked":
-            return issues
-
-        missing_side = "source" if source_contract is None else "target"
-        if missing_side == "source":
-            message = (
-                "Connection allowed using structural checks. The source does not declare a "
-                "compatibility profile. The target profile can validate the value, but not "
-                "the source's intended scientific meaning."
-            )
-        else:
-            message = (
-                "Connection allowed using structural checks. The target does not declare a "
-                "compatibility profile, so scientific compatibility was not verified."
-            )
-        issues.append(
-            _issue(
-                "warning",
-                "PROFILE_PARTIAL",
-                message,
-            )
-        )
-        issues.extend(
-            _run_checker(
-                get_profile(str(declared_contract["profile"])),
-                sample,
-            )
-        )
-        return issues
-
-    source_validation = validate_contract(source_contract)
-    target_validation = validate_contract(target_contract)
-    issues.extend(source_validation.issues)
-    issues.extend(target_validation.issues)
-    if source_validation.status == "blocked" or target_validation.status == "blocked":
-        return issues
-    source_ref = str(source_contract["profile"])
-    target_ref = str(target_contract["profile"])
-    if source_ref != target_ref:
-        issues.append(
-            _issue(
-                "blocked",
-                "PROFILE_MISMATCH",
-                f"The source uses '{source_ref}', but the target expects '{target_ref}'.",
-            )
-        )
-        return issues
-    issues.extend(_compare_context(source_contract, target_contract))
-    if any(issue.level == "blocked" for issue in issues):
-        return issues
-    issues.extend(_run_checker(get_profile(source_ref), sample))
-    return issues
+def _contract_issues(source_contract, target_contract, sample) -> list[CompatibilityIssue]:
+    # Scientific profiles remain readable metadata; they cannot admit or reject work.
+    return []
 
 
 def check_payload(contract: Mapping[str, Any] | None, value: Any) -> CompatibilityResult:
-    validation = validate_contract(contract)
-    if contract is None or validation.status == "blocked":
-        return validation
-    return CompatibilityResult(
-        validation.issues + _run_checker(get_profile(str(contract["profile"])), value)
-    )
+    """Legacy API: scientific payload grading has been removed."""
+    return CompatibilityResult()
 
 
 def enforce_result(
@@ -481,105 +246,18 @@ def _finding(path: str, issue: CompatibilityIssue) -> dict[str, Any]:
 
 
 def validate_manifest(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Validate port structure, preserving old scientific declarations as metadata."""
     findings: list[dict[str, Any]] = []
-    compatibility = manifest.get("compatibility")
-    if compatibility is not None:
-        if not isinstance(compatibility, Mapping):
-            findings.append(
-                _finding("/compatibility", _issue("blocked", "STANDARD_MISMATCH", "compatibility must be a mapping"))
-            )
-        else:
-            unknown = sorted(set(compatibility) - _STANDARD_FIELDS)
-            if unknown:
-                findings.append(
-                    _finding(
-                        "/compatibility",
-                        _issue("blocked", "STANDARD_MISMATCH", "compatibility has unsupported field(s): " + ", ".join(unknown)),
-                    )
-                )
-            if compatibility.get("standard") != STANDARD_ID or str(compatibility.get("version")) != STANDARD_VERSION:
-                findings.append(
-                    _finding(
-                        "/compatibility",
-                        _issue(
-                            "blocked",
-                            "STANDARD_MISMATCH",
-                            f"compatibility must declare standard '{STANDARD_ID}' version '{STANDARD_VERSION}'.",
-                        ),
-                    )
-                )
-
     io = manifest.get("io")
     if io is None:
         return findings
     if not isinstance(io, Mapping):
-        findings.append(_finding("/io", _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", "io must be a mapping")))
-        return findings
-
-    has_contract = False
+        return [_finding("/io", _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", "io must be a mapping"))]
     for direction in ("inputs", "outputs"):
-        ports = io.get(direction, [])
-        if not isinstance(ports, list):
-            findings.append(
-                _finding(f"/io/{direction}", _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", f"io.{direction} must be a list"))
-            )
-            continue
-        names: set[str] = set()
-        for index, port in enumerate(ports):
-            path = f"/io/{direction}/{index}"
-            if not isinstance(port, Mapping):
-                findings.append(_finding(path, _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", "port must be a mapping")))
-                continue
-            name = port.get("name")
-            if not isinstance(name, str) or not name:
-                findings.append(_finding(path + "/name", _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", "port name must be a non-empty string")))
-            elif name in names:
-                findings.append(_finding(path + "/name", _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", f"port '{name}' is listed more than once")))
-            else:
-                names.add(name)
-
-            contract = port.get("contract")
-            if contract is not None:
-                has_contract = True
-                validation = validate_contract(contract)
-                findings.extend(_finding(path + "/contract", issue) for issue in validation.issues)
-                if validation.status != "blocked":
-                    profile = get_profile(str(contract["profile"]))
-                    if not _representation_allowed(port, profile, direction=direction):
-                        findings.append(
-                            _finding(
-                                path,
-                                _issue(
-                                    "blocked",
-                                    "PROFILE_REPRESENTATION_MISMATCH",
-                                    f"Port representation is not allowed by '{contract['profile']}'.",
-                                ),
-                            )
-                        )
-            accepted_profiles = port.get("accepted_profiles") or []
-            if not isinstance(accepted_profiles, list):
-                findings.append(_finding(path + "/accepted_profiles", _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", "accepted_profiles must be a list")))
-                continue
-            for profile_index, accepted in enumerate(accepted_profiles):
-                accepted_path = f"{path}/accepted_profiles/{profile_index}"
-                if not isinstance(accepted, Mapping):
-                    findings.append(_finding(accepted_path, _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", "accepted profile must be a mapping")))
-                    continue
-                accepted_contract = accepted.get("contract")
-                if accepted_contract is not None:
-                    has_contract = True
-                    findings.extend(
-                        _finding(accepted_path + "/contract", issue)
-                        for issue in validate_contract(accepted_contract).issues
-                    )
-    if has_contract and compatibility is None:
-        findings.insert(
-            0,
-            _finding(
-                "/compatibility",
-                _issue("blocked", "STANDARD_REQUIRED", "A model with profiled ports must declare the compatibility standard."),
-            ),
-        )
+        try:
+            _ports_by_name(manifest, direction)
+        except ValueError as exc:
+            findings.append(_finding(f"/io/{direction}", _issue("blocked", "PROFILE_REPRESENTATION_MISMATCH", str(exc))))
     return findings
 
 
@@ -692,13 +370,9 @@ def _bind_port(*, direction: str, name: str, declared: Mapping[str, Any], implem
             )
             if "contract" in declared_profile:
                 code_contract = implemented_profiles[index].get("contract")
-                if code_contract is not None and code_contract != declared_profile["contract"]:
-                    raise ValueError(f"{label}.accepted_profiles[{index}].contract differs between model.yaml and the Python module")
                 implemented_profiles[index]["contract"] = copy.deepcopy(declared_profile["contract"])
         implemented_data["accepted_profiles"] = implemented_profiles or None
     if "contract" in declared:
-        if implemented.contract is not None and implemented.contract != declared["contract"]:
-            raise ValueError(f"{label}.contract differs between model.yaml and the Python module")
         implemented_data["contract"] = copy.deepcopy(declared["contract"])
     return SignalSpec.from_dict(implemented_data)
 
@@ -771,7 +445,8 @@ def compatibility_provenance(manifest: Mapping[str, Any]) -> dict[str, Any] | No
         "catalogue_package": CATALOGUE_PACKAGE,
         "catalogue_version": CATALOGUE_VERSION,
         "catalogue_sha256": CATALOGUE_SHA256,
-        "profiles": [{"ref": ref, "sha256": profile_digest(ref)} for ref in sorted(refs)],
+        "profiles": [{"ref": ref, "sha256": _legacy_profile_digest(ref)} for ref in sorted(refs)],
+        "scope": "structural",
     }
 
 
@@ -951,42 +626,8 @@ class CompatibilityRecorder:
         *,
         profile: str | None = None,
     ) -> None:
-        failed = result.status == "blocked"
-        wire: dict[str, Any] | None = None
-        if kind == "wire_value":
-            source_module, _, source_port = (peer or "").rpartition(".")
-            wire = self._wires.get((source_module, source_port, module, port))
-            profiled = wire is None or bool(wire["source"]["profile"] or wire["target"]["profile"])
-            if not profiled and not failed:
-                return
-        direction = "output" if kind == "output_value" else "input"
-        port_entry = self._ports.get((module, direction, port))
-        if port_entry is None and profile is not None:
-            port_entry = {
-                "module": module,
-                "direction": direction,
-                "port": port,
-                "profile": profile,
-                "value_checks": {"count": 0, "failures": 0},
-            }
-            self._ports[(module, direction, port)] = port_entry
-            self._profiles.add(profile)
-
-        self._value_checks += 1
-        if failed:
-            self._value_failures += 1
-        for counts in (
-            wire["value_checks"] if wire is not None else None,
-            port_entry["value_checks"] if port_entry is not None else None,
-        ):
-            if counts is not None:
-                counts["count"] += 1
-                if failed:
-                    counts["failures"] += 1
-        if wire is not None:
-            self._merge_result(wire, result)
-        if failed:
-            self._add_violation(kind, module, port, peer, result, sim_time)
+        # Kept for old callers; payload grading and its counters have been retired.
+        return None
 
     def check_output(
         self,
@@ -998,25 +639,7 @@ class CompatibilityRecorder:
     ) -> CompatibilityResult | None:
         """Check one emitted value, skipping a file already checked unchanged."""
 
-        fingerprint = _file_fingerprint(value)
-        cache_key = (module, port)
-        if fingerprint is not None and self._checked_output_files.get(cache_key) == fingerprint:
-            return None
-        result = check_payload(contract, value)
-        self.record_value_check(
-            "output_value",
-            module,
-            port,
-            None,
-            result,
-            sim_time,
-            profile=_contract_ref(contract),
-        )
-        if fingerprint is not None and result.status != "blocked":
-            self._checked_output_files[cache_key] = fingerprint
-        else:
-            self._checked_output_files.pop(cache_key, None)
-        return result
+        return None
 
     def _merge_result(self, wire: dict[str, Any], result: CompatibilityResult) -> None:
         wire["status"] = _worst_status(wire["status"], result)
@@ -1072,6 +695,7 @@ class CompatibilityRecorder:
             profiles.append({"ref": ref, "sha256": digest})
         return {
             "schema_version": RECORD_SCHEMA_VERSION,
+            "scope": "structural",
             "standard": STANDARD_ID,
             "version": STANDARD_VERSION,
             "catalogue_package": CATALOGUE_PACKAGE,
@@ -1094,126 +718,3 @@ class CompatibilityRecorder:
             "violations": copy.deepcopy(self._violations),
             "truncated": self._truncated,
         }
-
-
-def _require_string(sample: Any, label: str) -> tuple[str | None, tuple[CompatibilityIssue, ...]]:
-    if not isinstance(sample, str):
-        return None, (_issue("blocked", "VALUE_INVALID", f"{label} must be a string."),)
-    return sample, ()
-
-
-def _check_protein_sequence(sample: Any) -> Iterable[CompatibilityIssue]:
-    raw, issues = _require_string(sample, "Protein sequence")
-    if issues:
-        return issues
-    sequence = "".join(raw.split()).upper()
-    if not sequence:
-        return (_issue("blocked", "VALUE_INVALID", "Protein sequence must not be empty."),)
-    invalid = sorted(set(sequence) - set("ACDEFGHIKLMNPQRSTVWYBXZJUO"))
-    if invalid:
-        return (_issue("blocked", "VALUE_INVALID", "Protein sequence contains unsupported character(s): " + ", ".join(invalid)),)
-    return ()
-
-
-def _check_molecular_smiles(sample: Any) -> Iterable[CompatibilityIssue]:
-    value, issues = _require_string(sample, "SMILES")
-    if issues:
-        return issues
-    if not value:
-        return (_issue("blocked", "VALUE_INVALID", "SMILES must not be empty."),)
-    if ">" in value:
-        return (_issue("blocked", "VALUE_INVALID", "Reaction SMILES is not accepted by the molecular SMILES profile."),)
-    if any(character.isspace() for character in value):
-        return (_issue("blocked", "VALUE_INVALID", "SMILES must not contain whitespace."),)
-    if value.count("[") != value.count("]") or value.count("(") != value.count(")"):
-        return (_issue("blocked", "VALUE_INVALID", "SMILES has unbalanced brackets or parentheses."),)
-    try:
-        from rdkit import Chem  # type: ignore
-    except ImportError:
-        return (_issue("warning", "PARSER_UNAVAILABLE", "Basic SMILES checks passed; RDKit is not installed for parser validation."),)
-    if Chem.MolFromSmiles(value) is None:
-        return (_issue("blocked", "VALUE_INVALID", "RDKit could not parse the SMILES value."),)
-    return ()
-
-
-def _read_checked_file(sample: Any, *, label: str) -> tuple[Path | None, str | None, tuple[CompatibilityIssue, ...]]:
-    raw, issues = _require_string(sample, label)
-    if issues:
-        return None, None, issues
-    path = Path(raw)
-    if not path.is_file():
-        return None, None, (_issue("blocked", "VALUE_INVALID", f"{label} path does not name a regular file."),)
-    try:
-        if path.stat().st_size <= 0:
-            return None, None, (_issue("blocked", "VALUE_INVALID", f"{label} file is empty."),)
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        return None, None, (_issue("blocked", "VALUE_INVALID", f"{label} file cannot be read: {exc}"),)
-    return path, text, ()
-
-
-def _check_a3m_file(sample: Any) -> Iterable[CompatibilityIssue]:
-    _, text, issues = _read_checked_file(sample, label="A3M")
-    if issues:
-        return issues
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if not lines or not lines[0].startswith(">"):
-        return (_issue("blocked", "VALUE_INVALID", "A3M must begin with a FASTA-style header."),)
-    records = 0
-    query_parts: list[str] = []
-    for line in lines:
-        if line.startswith(">"):
-            records += 1
-        elif records == 1:
-            query_parts.append(line)
-    if records < 1 or not "".join(query_parts).strip():
-        return (_issue("blocked", "VALUE_INVALID", "A3M must contain a non-empty query sequence."),)
-    return ()
-
-
-def _check_mmcif_file(sample: Any) -> Iterable[CompatibilityIssue]:
-    _, text, issues = _read_checked_file(sample, label="mmCIF")
-    if issues:
-        return issues
-    if not any(line.lstrip().lower().startswith("data_") for line in text.splitlines()):
-        return (_issue("blocked", "VALUE_INVALID", "mmCIF file does not contain a data block."),)
-    return ()
-
-
-def _number(sample: Any) -> float | None:
-    if isinstance(sample, bool) or not isinstance(sample, (int, float)):
-        return None
-    value = float(sample)
-    return value if math.isfinite(value) else None
-
-
-def _check_probability(sample: Any) -> Iterable[CompatibilityIssue]:
-    value = _number(sample)
-    if value is None or not 0 <= value <= 1:
-        return (_issue("blocked", "VALUE_INVALID", "Probability must be a finite number from 0 through 1."),)
-    return ()
-
-
-def _check_finite_number(sample: Any) -> Iterable[CompatibilityIssue]:
-    if _number(sample) is None:
-        return (_issue("blocked", "VALUE_INVALID", "Value must be a finite number."),)
-    return ()
-
-
-_CHECKERS: dict[str, Checker] = {
-    "protein_sequence": _check_protein_sequence,
-    "molecular_smiles": _check_molecular_smiles,
-    "a3m_file": _check_a3m_file,
-    "mmcif_file": _check_mmcif_file,
-    "probability": _check_probability,
-    "finite_number": _check_finite_number,
-}
-
-
-def _validate_checker_registry() -> None:
-    missing = sorted({_profile["checker"] for _profile in list_profiles()} - set(_CHECKERS))
-    if missing:
-        raise RuntimeError("Compatibility catalogue references unavailable checker(s): " + ", ".join(missing))
-
-
-_validate_checker_registry()

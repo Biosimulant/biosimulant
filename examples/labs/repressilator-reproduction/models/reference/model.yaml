@@ -1,0 +1,32 @@
+schema_version: "2.0"
+package: repressilator-reference
+version: 0.1.0
+title: Elowitz2000 - Repressilator
+description: RoadRunner-only temporal adapter for unmodified BioModels revision-3; copies per cell and minutes.
+standard: sbml
+biosim:
+  entrypoint: src.reference:RepressilatorReference
+  communication_step: 2000
+  execution_policy: each_window
+runtime:
+  dependencies:
+    packages:
+      - biosimulant==0.0.37
+      - libroadrunner==2.8.0
+      - scipy==1.15.3
+      - numpy==2.2.6
+io:
+  inputs: []
+  outputs:
+    - name: trajectory
+      signal_type: record
+      schema: {payload: json}
+      emitted_unit: copies/cell
+    - name: state
+      signal_type: record
+      schema: {X: float, Y: float, Z: float, PX: float, PY: float, PZ: float}
+      emitted_unit: copies/cell
+    - name: summary
+      signal_type: record
+      schema: {duration_simulated: float, observable_count: int, largest_change_observable: str, largest_change_magnitude: float, peak_observable: str, peak_value: float}
+      emitted_unit: "1"

@@ -679,6 +679,8 @@ class BioWorld:
             return
 
         self._validate_execution_graph()
+        for entry in self._modules.values():
+            entry.module._clear_execution_outcome()
         if not self._is_setup:
             self.setup()
 
@@ -903,6 +905,11 @@ class BioWorld:
                 for module_name, port in sorted(self._last_published_refs)
             ],
             "completed_once": sorted(self._completed_once),
+            "execution_outcomes": {
+                name: copy.deepcopy(entry.module.get_execution_outcome())
+                for name, entry in self._modules.items()
+                if entry.module.get_execution_outcome() is not None
+            },
             "connections": {
                 target: [
                     {
@@ -938,6 +945,11 @@ class BioWorld:
                 raise KeyError(f"snapshot missing module state for '{name}'")
             entry.module.restore(copy.deepcopy(module_states[name]))
 
+        for name, entry in self._modules.items():
+            value = snapshot.get("execution_outcomes", {}).get(name)
+            entry.module._execution_outcome = None
+            if value is not None:
+                entry.module.report_execution_outcome(value)
         self._current_time = float(snapshot.get("current_time", 0.0))
         self._is_setup = bool(snapshot.get("is_setup", True))
         self._setup_config = copy.deepcopy(snapshot.get("setup_config", {}))
@@ -999,6 +1011,14 @@ class BioWorld:
     @property
     def module_names(self) -> List[str]:
         return list(self._modules.keys())
+
+    def execution_outcome(self) -> Dict[str, Any]:
+        from .execution_outcome import aggregate_outcomes
+
+        return aggregate_outcomes({
+            name: entry.module.get_execution_outcome()
+            for name, entry in self._modules.items()
+        })
 
     def get_outputs(self, name: str) -> Dict[str, BioSignal]:
         return self._signal_store.get(name, {})
