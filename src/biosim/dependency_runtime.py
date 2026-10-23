@@ -290,7 +290,7 @@ def isolated_environment(
             ]:
                 try:
                     output = run_dependency_command(command, **diagnostic_callbacks)
-                    details.append(label + ": " + _redact_dependency_line(output[-6000:]))
+                    details.append(label + ": " + _redact_dependency_line(output)[-6000:])
                 except PackageError:
                     details.append(label + ": unavailable")
             raise PackageError("Dependency validation failed after installation.\n" + str(exc)

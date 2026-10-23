@@ -82,6 +82,34 @@ def test_validation_failure_retains_bounded_redacted_evidence_and_cleans_up(fail
     assert roots and all(not root.exists() for root in roots)
 
 
+@pytest.mark.parametrize(
+    ("url_prefix", "url_suffix"),
+    [
+        ("https://user:credential-prefix-", "@example.test/wheel.whl\n"),
+        ("https://example.test/wheel.whl?token=credential-prefix-", "\n"),
+    ],
+)
+def test_diagnostic_truncation_cannot_expose_partial_credentials(
+    failed_validation, url_prefix, url_suffix
+):
+    roots, _, outputs = failed_validation
+    secret = "boundary-secret"
+    final_package = "\ntellurium==2.2.11.2\n"
+    retained = secret + url_suffix
+    retained += "x" * (6000 - len(retained) - len(final_package)) + final_package
+    outputs["resolved packages"] = "padding\n" * 1000 + url_prefix + retained
+    assert outputs["resolved packages"][-6000:].startswith(secret)
+
+    with pytest.raises(PackageError) as caught:
+        with runtime.isolated_environment(["tellurium==2.2.11.2"]):
+            pytest.fail("An invalid environment must never reach execution")
+    message = str(caught.value)
+    assert secret not in message
+    assert "different platform" in message and "tellurium==2.2.11.2" in message
+    assert len(message) < 25000
+    assert roots and all(not root.exists() for root in roots)
+
+
 def test_unavailable_diagnostic_does_not_hide_validation_failure(failed_validation):
     roots, _, outputs = failed_validation
     outputs["installer"] = PackageError("installer introspection failed")
