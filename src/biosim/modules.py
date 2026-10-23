@@ -137,11 +137,16 @@ class BioModule(ABC):
     def get_execution_outcome(self) -> Mapping[str, Any] | None:
         return getattr(self, "_execution_outcome", None)
 
+    def _clear_execution_outcome(self) -> None:
+        """Start a new computation attempt without changing retained outputs."""
+
+        self._execution_outcome = None
+
     def _reset_execution_adapter(self) -> None:
         """Clear adapter-owned inputs and outputs without relying on super()."""
 
         self._execution_inputs = {}
-        self._execution_outcome = None
+        self._clear_execution_outcome()
         self._clear_execution_outputs()
 
     def _clear_execution_outputs(self) -> None:

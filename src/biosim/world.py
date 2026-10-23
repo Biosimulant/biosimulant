@@ -679,6 +679,8 @@ class BioWorld:
             return
 
         self._validate_execution_graph()
+        for entry in self._modules.values():
+            entry.module._clear_execution_outcome()
         if not self._is_setup:
             self.setup()
 

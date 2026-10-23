@@ -63,3 +63,59 @@ def test_child_exit_codes_preserve_failure_details_and_bound_retained_errors():
     assert len(normalized["error"]["message"]) == 2000
     assert normalized["error"]["record_id"] == "12"
     assert "private" not in normalized["error"]
+
+
+@pytest.mark.parametrize("policy", list(ExecutionPolicy))
+def test_successful_retry_does_not_inherit_a_previous_run_failure(policy):
+    class RetryingAdapter(BioModule):
+        execution_policy = policy
+
+        def __init__(self):
+            self.attempts = 0
+
+        def outputs(self):
+            return {"report": SignalSpec.scalar(dtype="str")}
+
+        def execute(self, inputs, *, context):
+            self.attempts += 1
+            if self.attempts == 1:
+                self.report_execution_outcome(ExecutionOutcome(
+                    "failed", stage="annotation", error={"message": "First attempt failed"}
+                ))
+            return {"report": f"attempt {self.attempts}"}
+
+    adapter = RetryingAdapter()
+    world = BioWorld(communication_step=1)
+    world.add_biomodule("adapter", adapter)
+    world.run(duration=1)
+    failed = world.execution_outcome()
+    assert failed["state"] == "failed"
+    world.run(duration=0)
+    assert world.execution_outcome() == failed
+    world.run(duration=1)
+    outcome = world.execution_outcome()
+    assert outcome["state"] == "completed"
+    assert "error" not in outcome and "stage" not in outcome
+    assert outcome["components"] == [{"module": "adapter", "schema_version": "1", "state": "completed"}]
+    assert world.get_outputs("adapter")["report"].value == "attempt 2"
+
+
+def test_failure_remains_visible_for_all_windows_in_the_same_run():
+    class WindowAdapter(BioModule):
+        execution_policy = ExecutionPolicy.EACH_WINDOW
+
+        def __init__(self):
+            self.attempts = 0
+
+        def execute(self, inputs, *, context):
+            self.attempts += 1
+            if self.attempts == 1:
+                self.report_execution_outcome(ExecutionOutcome("partial", stage="first window"))
+            return {}
+
+    world = BioWorld(communication_step=1)
+    world.add_biomodule("adapter", WindowAdapter())
+    world.run(duration=3)
+    assert world.execution_outcome()["state"] == "partial"
+    world.run(duration=1)
+    assert world.execution_outcome()["state"] == "completed"
