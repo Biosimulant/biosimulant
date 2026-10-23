@@ -86,16 +86,10 @@ _CATALOG = {
 }
 SUPPORTED_RENDERERS = tuple(_CATALOG)
 VISUALIZATION_AGENT_GUIDANCE = (
-    "Almost every new Lab and scientific result model needs a useful visualization of actual "
-    "computed outputs. Available renderers: timeseries (time evolution), bar (categories), "
-    "scatter (observed versus predicted), heatmap (matrices/spatial fields), graph (networks), "
-    "table (exact values), image (scientific images/overlays), structure3d (coordinates), and "
-    "text (interpretation/caveats). Choose by the user's question; a table is not the default "
-    "for every result. Before authoring, read get_biosimulant_authoring_contract topic "
-    "visualization. Record visuals in MRS/MTS, implement BioModule.visualize() from computed "
-    "state and declare lab.yaml visualization requirements. Infrastructure-only components "
-    "may opt out with a recorded reason. Ad-hoc chat charts do not satisfy reusable Lab "
-    "visualization requirements. Retain typed scientific outputs alongside visuals."
+    "Choose useful visualizations from actual computed outputs when they help answer the user's "
+    "question. Available renderers include timeseries, bar, scatter, heatmap, graph, table, image, "
+    "structure3d and text. File-only work does not require a visualization. Preserve typed outputs "
+    "and saved files, including useful partial outputs when a computation or visualization fails."
 )
 
 

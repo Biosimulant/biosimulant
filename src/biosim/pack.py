@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
-from .__about__ import __version__
 from ._errors import PackageError
 from .execution import (
     bind_manifest_execution_policy,
@@ -1772,7 +1771,10 @@ def _run_lab_loaded_package(
             "duration": duration,
             "communication_step": prepared.communication_step,
             "settle_steps": settle_steps,
-            "execution": describe_lab_execution(world.execution_policies).to_dict(),
+            "execution": {
+                **describe_lab_execution(world.execution_policies).to_dict(),
+                "outcome": world.execution_outcome(),
+            },
             "modules": prepared.modules,
             "outputs": outputs,
             "visuals": visuals,

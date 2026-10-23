@@ -848,15 +848,7 @@ class SignalEnvelope:
                 "SignalEnvelope was made for a different contract "
                 f"(port expects {expected}, envelope has {self.contract_digest})"
             )
-        if isinstance(self.actual_context, Mapping):
-            for name in ("species", "identifier_namespace"):
-                actual = self.actual_context.get(name)
-                declared = contract.get(name)
-                if actual is not None and declared not in {None, "any", actual}:
-                    raise ValueError(
-                        f"SignalEnvelope actual_context.{name} is {actual!r}, but the port "
-                        f"contract declares {declared!r}"
-                    )
+
 
 
 class BioSignal:

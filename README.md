@@ -468,3 +468,8 @@ Almost every scientific Lab should include a useful visualization of computed re
 Read [the nine-renderer contract and end-to-end authoring guide](docs/visualization.md).
 Use `visualization_catalog()` to inspect portable v1 examples and declare required views
 in `lab.yaml`; typed outputs remain authoritative.
+
+
+## Computation and compatibility
+
+Scientific payload grading has been removed. Legacy profile metadata remains readable; structural port and execution checks remain enforced. Adapters can report `ExecutionOutcome` (0.0.38+) for inner failures while retaining saved results. MRS/MTS, evidence, benchmarks and visualizations are not execution prerequisites.

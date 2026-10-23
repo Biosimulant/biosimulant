@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.38
+
+- Remove biological profile and payload grading. Legacy contracts/catalogue references remain descriptive; structural port, shape, dtype, format and unit checks remain.
+- Add explicit `ExecutionOutcome` reporting for child-command failures and partial computations, retained in result documents and snapshots independently of outputs.
+- Keep existing Lab interfaces and manifests readable. File-only work requires no visualization. The compatibility catalogue is optional runtime metadata.
+
 All notable changes to `biosimulant` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
