@@ -101,14 +101,27 @@ def _run_package_for_cli(
     install_deps: bool,
     dependency_root: str | Path | None = None,
 ) -> dict[str, Any]:
+    from .progress_stream import progress_events_enabled
+
+    # A watched run shows dependency installs as they happen instead of
+    # going quiet for minutes while an isolated environment is built.
+    dependency_logger = _stderr_line_logger if progress_events_enabled() else None
     return run_package_with_managed_python(
         package_file,
         install_deps=install_deps,
         dependency_root=dependency_root,
         in_process_runner=lambda path: run_package(
-            path, install_deps=install_deps, dependency_root=dependency_root
+            path,
+            install_deps=install_deps,
+            dependency_root=dependency_root,
+            dependency_logger=dependency_logger,
         ),
     )
+
+
+def _stderr_line_logger(line: str) -> None:
+    sys.stderr.write(line + "\n")
+    sys.stderr.flush()
 
 
 def _labs_serve_child_argv(args: argparse.Namespace, resolved_lab_path: Path) -> list[str]:

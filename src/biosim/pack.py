@@ -1744,6 +1744,10 @@ def _run_lab_loaded_package(
     world = prepared.world
     duration = prepared.duration
     settle_steps = prepared.settle_steps
+    from .progress_stream import attach_progress_stream, progress_events_enabled
+
+    if progress_events_enabled():
+        attach_progress_stream(world)
     world.run(duration=duration)
     if settle_steps:
         world.settle(settle_steps)
