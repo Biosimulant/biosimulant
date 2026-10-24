@@ -17,6 +17,7 @@ import platform
 import shutil
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,7 @@ from biosim.web_login import (
 )
 from biosim.managed_runtime import (
     _current_python_minor,
+    _is_json_object_line,
     _runtime_cache_root,
     ensure_executor_python,
 )
@@ -918,17 +920,74 @@ def _run_result_data(result: Any) -> dict[str, Any]:
     }
 
 
+class _LiveCaptureStream(io.StringIO):
+    """Capture text and forward each complete line to ``forward`` as it arrives.
+
+    Machine-readable runs keep stdout for the JSON result, so model output and
+    progress are forwarded to stderr while the run is going. JSON object lines
+    are kept but not forwarded when ``skip_json_result`` is set.
+    """
+
+    def __init__(self, forward: Any, *, skip_json_result: bool = False) -> None:
+        super().__init__()
+        self._forward = forward
+        self._skip_json_result = skip_json_result
+        self._partial = ""
+        self._lock = threading.Lock()
+
+    def write(self, text: str) -> int:
+        with self._lock:
+            written = super().write(text)
+            *lines, self._partial = (self._partial + text).split("\n")
+            for line in lines:
+                self._forward_line(line)
+        return written
+
+    def flush(self) -> None:
+        with self._lock:
+            super().flush()
+            self._forward.flush()
+
+    def finish(self) -> None:
+        with self._lock:
+            partial, self._partial = self._partial, ""
+            if partial:
+                self._forward_line(partial)
+            self._forward.flush()
+
+    def _forward_line(self, line: str) -> None:
+        if not line.strip():
+            return
+        if self._skip_json_result and _is_json_object_line(line):
+            return
+        self._forward.write(line + "\n")
+        self._forward.flush()
+
+
 def _run_legacy(argv: list[str], options: GlobalOptions) -> Any:
     delegated = list(argv)
     if options.no_open and delegated[:2] == ["labs", "serve"]:
         delegated.append("--no-open")
     if options.machine:
         delegated.append("--json")
-        stdout = io.StringIO()
-        stderr = io.StringIO()
+        stdout: io.StringIO
+        stderr: io.StringIO
+        if delegated[:2] == ["labs", "run"]:
+            # Runs can take minutes: forward model output to the real stderr
+            # while capturing it, so a watcher can tell the run is alive.
+            stdout = _LiveCaptureStream(sys.stderr, skip_json_result=True)
+            stderr = _LiveCaptureStream(sys.stderr)
+        else:
+            stdout = io.StringIO()
+            stderr = io.StringIO()
         try:
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                _legacy_main(delegated, prog="biosimulant")
+                try:
+                    _legacy_main(delegated, prog="biosimulant")
+                finally:
+                    for stream in (stdout, stderr):
+                        if isinstance(stream, _LiveCaptureStream):
+                            stream.finish()
         except SystemExit as exc:
             code = int(exc.code or 0)
             if code == 0:

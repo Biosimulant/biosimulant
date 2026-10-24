@@ -13,6 +13,18 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- `labs run --json` no longer hides model output until the run ends. Model
+  stdout and stderr lines are forwarded to stderr as they are printed, while
+  stdout still carries only the JSON result.
+
+### Added
+
+- With `BIOSIM_PROGRESS_EVENTS=1`, lab runs write `BSIM_PROGRESS: {json}` lines
+  to stderr at start, per whole percent of simulated time (or at least every
+  5 seconds), and at finish, and show dependency install output as it happens.
+
 ## [0.0.37] - 2026-10-11
 
 ### Fixed

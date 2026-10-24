@@ -58,6 +58,20 @@ from settling; once-policy dependency chains are drained automatically.
 
 Step payloads include progress fields during active runs: `start`, `end`, `duration`, `progress`, `progress_pct`, and `remaining`.
 
+### Progress lines for watched runs
+
+Hosts that watch `biosimulant labs run` set `BIOSIM_PROGRESS_EVENTS=1`. The run
+then writes one line per update to stderr:
+
+```text
+BSIM_PROGRESS: {"message": "Simulated 3 (50.0%)", "phase": "running", "progress_pct": 50.0, "sim_time": 3.0, "step": 3, "step_count": 3, ...}
+```
+
+Lines are written at `STARTED`, whenever progress crosses another whole percent
+(or at least every 5 seconds), and at `FINISHED`. Model code should still print
+its own short progress lines with `print(..., flush=True)`; with `--json` they
+are forwarded to stderr while the run is going.
+
 ## Snapshot guarantees
 
 A world snapshot captures:
