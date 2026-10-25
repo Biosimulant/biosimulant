@@ -226,6 +226,20 @@
               "minItems": 1,
               "type": "array"
             },
+            "order": {
+              "enum": [
+                "given",
+                "similarity"
+              ]
+            },
+            "range": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
             "values": {
               "items": {
                 "items": {
@@ -285,6 +299,10 @@
             "edges": {
               "items": {
                 "properties": {
+                  "length": {
+                    "minimum": 0,
+                    "type": "number"
+                  },
                   "source": {
                     "minLength": 1,
                     "type": "string"
@@ -304,12 +322,29 @@
               "minItems": 0,
               "type": "array"
             },
+            "layout": {
+              "enum": [
+                "network",
+                "tree"
+              ]
+            },
+            "length_unit": {
+              "minLength": 1,
+              "type": "string"
+            },
             "nodes": {
               "items": {
                 "properties": {
                   "id": {
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "label": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "support": {
+                    "type": "number"
                   }
                 },
                 "required": [
@@ -320,6 +355,10 @@
               "maxItems": 10000,
               "minItems": 1,
               "type": "array"
+            },
+            "root": {
+              "minLength": 1,
+              "type": "string"
             }
           },
           "required": [

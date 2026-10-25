@@ -186,6 +186,35 @@ it("draws graph nodes and edges rather than only a count", async () => {
   expect(container.querySelectorAll("svg circle").length).toBe(2);
   expect(container.querySelectorAll("svg line").length).toBe(1);
 });
+it("draws a phylogeny as a tree with every tip, support values and a scale bar", async () => {
+  const tips = Array.from({ length: 30 }, (_, index) => `GCF_${index}`);
+  // A caterpillar tree: branch point i carries tip i and branch point i + 1.
+  const nodes = [
+    ...tips.slice(0, 29).map((_, index) => ({ id: `n${index}`, label: index === 0 ? `n${index}` : "100" })),
+    ...tips.map((tip) => ({ id: tip, label: tip })),
+  ];
+  const edges = [
+    ...tips.slice(0, 29).map((tip, index) => ({ source: `n${index}`, target: tip, length: 0.001 })),
+    ...tips.slice(1, 29).map((_, index) => ({ source: `n${index}`, target: `n${index + 1}`, length: 0.002 })),
+    { source: "n28", target: "GCF_29", length: 0.001 },
+  ];
+  const container = await renderVisual({render: "graph", data: {nodes, edges, layout: "tree", length_unit: "substitutions/site"}});
+  expect(container.textContent).toContain("30 tips");
+  expect(container.querySelectorAll("svg circle").length).toBe(30);
+  for (const tip of tips) expect(container.textContent).toContain(tip);
+  expect(container.textContent).toContain("100");
+  expect(container.textContent).toContain("substitutions/site");
+});
+it("groups a distance matrix by similarity and says how the colours are scaled", async () => {
+  const labels = ["a", "b", "c", "d"];
+  const values = [[0, 0.9, 0.1, 0.8], [0.9, 0, 0.85, 0.2], [0.1, 0.85, 0, 0.9], [0.8, 0.2, 0.9, 0]];
+  const container = await renderVisual({render: "heatmap", data: {values, x_labels: labels, y_labels: labels, unit: "1", range: [0, 1]}});
+  const rowLabels = [...container.querySelectorAll(".heatmap tbody th")].map((cell) => cell.textContent);
+  expect(rowLabels).toEqual(["a", "c", "b", "d"]);
+  expect(container.textContent).toContain("grouped by similarity");
+  expect(container.textContent).toContain("Colour scale 0 to 1.");
+  expect(container.querySelector(".heatmap thead th")!.textContent).toBe("");
+});
 it("renders the documented axis units", async () => {
   const container = await renderVisual({render: "timeseries", data: {series: [{name: "Population", points: [[0, 1], [1, 2]]}], x_label: "Time", x_unit: "h", y_label: "Population", y_unit: "CFU"}});
   expect(container.textContent).toContain("Time (h)");

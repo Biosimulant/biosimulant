@@ -3,6 +3,7 @@ import { ArrowsOutIcon, GitBranchIcon } from "@phosphor-icons/react";
 import "molstar/build/viewer/molstar.css";
 import type { Viewer as MolstarViewerInstance } from "molstar/lib/apps/viewer/app";
 import type { RunModuleVisuals, RunVisualSpec } from "../types";
+import { heatmapRange, meaningfulUnit, scaleBarLength, similarityOrder, treeLayout, type TreeLayout } from "../lib/visual-layout";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -313,27 +314,45 @@ function ScatterVisual({ data }: { data: Record<string, unknown> }) {
 
 function HeatmapVisual({ data }: { data: Record<string, unknown> }) {
   const matrix = Array.isArray(data.values) ? data.values : Array.isArray(data.matrix) ? data.matrix : [];
-  const rows = matrix.filter(Array.isArray) as number[][];
+  const rows = (matrix.filter(Array.isArray) as unknown[][]).map((row) => row.map(Number));
   if (!rows.length || !rows[0]?.length) return <pre className="json-block compact">{compactJson(data)}</pre>;
-  const values = rows.flat().map(Number).filter(Number.isFinite);
-  const min = Math.min(...values), max = Math.max(...values);
-  const xLabels = Array.isArray(data.x_labels) ? data.x_labels : [];
-  const yLabels = Array.isArray(data.y_labels) ? data.y_labels : [];
-  const unit = typeof data.unit === "string" ? data.unit : "";
+  const { min, max, fixed } = heatmapRange(data.range, rows.flat());
+  const xLabels = (Array.isArray(data.x_labels) ? data.x_labels : []).map(String);
+  const yLabels = (Array.isArray(data.y_labels) ? data.y_labels : []).map(String);
+  const unit = meaningfulUnit(typeof data.unit === "string" ? data.unit : undefined) ?? "";
+  // Similar rows sit together; the same order is used for the columns so the diagonal stays a diagonal.
+  const grouped = data.order === "given" ? null : similarityOrder(rows, xLabels, yLabels);
+  const order = grouped ?? rows.map((_, index) => index);
+  const columns = grouped ?? rows[0].map((_, index) => index);
   return <div className="heatmap" style={{ display: "block", overflow: "auto" }}>
     <table aria-label={typeof data.title === "string" ? data.title : "Heatmap"}>
-      <thead><tr><th>{unit}</th>{rows[0].map((_, col) => <th key={col}>{String(xLabels[col] ?? col + 1)}</th>)}</tr></thead>
-      <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>
-        <th>{String(yLabels[rowIndex] ?? rowIndex + 1)}</th>
-        {row.map((raw, col) => { const value = Number(raw); const ratio = max === min ? .5 : (value - min) / (max - min); return <td key={col} title={`${value} ${unit}`} style={{ padding: "8px 12px", background: `hsl(${220 - ratio * 220}, 72%, ${94 - ratio * 48}%)`, color: ratio > .65 ? "white" : "#172033" }}>{formatTick(value)}</td>; })}
+      <thead><tr><th>{unit}</th>{columns.map((col) => <th key={col}>{xLabels[col] ?? col + 1}</th>)}</tr></thead>
+      <tbody>{order.map((rowIndex) => <tr key={rowIndex}>
+        <th>{yLabels[rowIndex] ?? rowIndex + 1}</th>
+        {columns.map((col) => { const value = rows[rowIndex][col]; const ratio = Math.max(0, Math.min(1, max === min ? .5 : (value - min) / (max - min))); return <td key={col} title={`${value} ${unit}`} style={{ padding: "8px 12px", background: `hsl(${220 - ratio * 220}, 72%, ${94 - ratio * 48}%)`, color: ratio > .65 ? "white" : "#172033" }}>{formatTick(value)}</td>; })}
       </tr>)}</tbody>
     </table>
+    <p className="visual-note">
+      Colour scale {formatTick(min)} to {formatTick(max)}{unit ? ` ${unit}` : ""}{fixed ? "" : ", fitted to this data"}.
+      {grouped ? " Rows and columns are grouped by similarity." : ""}
+    </p>
   </div>;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  return Number.isFinite(number) ? number : undefined;
 }
 
 function GraphVisual({ data }: { data: Record<string, unknown> }) {
   const nodes = (Array.isArray(data.nodes) ? data.nodes : []).filter(isRecord);
   const edges = (Array.isArray(data.edges) ? data.edges : []).filter(isRecord);
+  const tree = treeLayout(
+    nodes.map((node) => ({ id: String(node.id), label: String(node.label ?? node.id), support: finiteNumber(node.support) })),
+    edges.map((edge) => ({ source: String(edge.source), target: String(edge.target), length: finiteNumber(edge.length) })),
+    { layout: data.layout, root: data.root },
+  );
+  if (tree) return <TreeVisual tree={tree} data={data} />;
   const positions = new Map(nodes.map((node, index) => {
     const angle = 2 * Math.PI * index / Math.max(1, nodes.length);
     return [String(node.id), { x: 260 + 150 * Math.cos(angle), y: 140 + 90 * Math.sin(angle) }] as const;
@@ -346,6 +365,44 @@ function GraphVisual({ data }: { data: Record<string, unknown> }) {
         <circle cx={position.x} cy={position.y} r="10" fill="#0f766e" />
         <text x={position.x} y={position.y + 25} textAnchor="middle" fill="currentColor" fontSize="11">{String(node.label ?? node.id)}</text>
       </g>; })}
+    </svg>
+  </div>;
+}
+
+/** A rectangular tree: tips down the right, branch lengths across, support at branch points. */
+function TreeVisual({ tree, data }: { tree: TreeLayout; data: Record<string, unknown> }) {
+  const byId = new Map(tree.nodes.map((node) => [node.id, node]));
+  const unit = typeof data.length_unit === "string" ? data.length_unit : "";
+  const longest = Math.max(...tree.nodes.filter((node) => node.leaf).map((node) => node.label.length));
+  const width = 560, left = 16, rowHeight = 16, top = 12;
+  const labelWidth = Math.min(200, longest * 6.2 + 10);
+  const plotWidth = width - left - labelWidth;
+  const height = top + (tree.leafCount - 1) * rowHeight + (tree.scaled ? 40 : 16);
+  const sx = (x: number) => left + (tree.maxX > 0 ? x / tree.maxX : 0) * plotWidth;
+  const sy = (y: number) => top + y * rowHeight;
+  const bar = tree.scaled ? scaleBarLength(tree.maxX) : 0;
+  return <div className="graph-visual">
+    <div className="graph-summary">
+      <GitBranchIcon size={14} /> {tree.leafCount} tips / {tree.nodes.length - tree.leafCount} branch points
+      {tree.scaled ? "" : " / branch lengths not given, drawn by depth"}
+    </div>
+    <svg className="chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={typeof data.title === "string" ? data.title : `Tree of ${tree.leafCount} tips`}>
+      {tree.nodes.map((node) => { const parent = node.parent ? byId.get(node.parent) : undefined; return parent
+        ? <path key={`branch-${node.id}`} d={`M ${sx(parent.x)} ${sy(parent.y)} V ${sy(node.y)} H ${sx(node.x)}`} fill="none" stroke="currentColor" opacity=".55" />
+        : null; })}
+      {tree.nodes.map((node) => node.leaf
+        ? <g key={node.id}>
+          <circle cx={sx(node.x)} cy={sy(node.y)} r="2.5" fill="#0f766e" />
+          <text x={sx(node.x) + 6} y={sy(node.y) + 3.5} fill="currentColor" fontSize="10">{node.label}</text>
+        </g>
+        : <text key={node.id} x={sx(node.x) - 3} y={sy(node.y) - 3} textAnchor="end" fill="currentColor" opacity=".6" fontSize="8">
+          {[node.label !== node.id ? node.label : "", node.support !== undefined ? formatTick(node.support) : ""].filter(Boolean).join(" ")}
+          <title>{node.support !== undefined ? `Support ${node.support} at ${node.label}` : node.label}</title>
+        </text>)}
+      {bar > 0 ? <g>
+        <line x1={left} x2={left + (bar / tree.maxX) * plotWidth} y1={height - 18} y2={height - 18} stroke="currentColor" />
+        <text x={left} y={height - 4} fill="currentColor" fontSize="9">{formatTick(bar)}{unit ? ` ${unit}` : ""}</text>
+      </g> : null}
     </svg>
   </div>;
 }

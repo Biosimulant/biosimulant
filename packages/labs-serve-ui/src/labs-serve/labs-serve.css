@@ -766,6 +766,12 @@ th {
   font-size: var(--text-base);
 }
 
+.visual-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
 .text-visual {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
