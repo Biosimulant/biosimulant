@@ -14,8 +14,8 @@ asset lifecycle and acceptance rules. Both agent surfaces share this contract.
 | `timeseries` | Dynamics and trajectories | `series: [{name, points: [[x, y], ...]}]`; `x_label`, `x_unit`, `y_label`, `y_unit` |
 | `bar` | Categories or endpoints | `items: [{label, value, unit?}]` |
 | `scatter` | Observed/predicted values, residuals | `points: [{x, y, label?, series?}]`; axis labels and units |
-| `heatmap` | Spatial fields, matrices, sweeps | Rectangular `values: [[number, ...], ...]`; `x_labels`, `y_labels`, `unit` |
-| `graph` | Networks | `nodes: [{id}]`, `edges: [{source, target}]` referencing those IDs |
+| `heatmap` | Spatial fields, matrices, sweeps | Rectangular `values: [[number, ...], ...]`; `x_labels`, `y_labels`, `unit`; optional `range: [min, max]`, `order` |
+| `graph` | Networks and trees | `nodes: [{id, label?, support?}]`, `edges: [{source, target, length?}]` referencing those IDs; optional `layout: "tree"`, `root`, `length_unit` |
 | `table` | Exact values and metadata | `columns: [string, ...]`, `rows: [[cell, ...], ...]`, matching widths |
 | `image` | Scientific images and annotated overlays | `source: {kind: "artifact", path: "outputs/annotated.png"}` and meaningful `alt`; optional `caption` |
 | `structure3d` | Molecular coordinates | `format: "pdb"` or `"mmcif"`, artifact `source` |
@@ -27,6 +27,23 @@ mapping. Add `title`, labels, units and `description` to explain the scientific 
 The catalog uses the common portable subset across local Labs Serve, Web and Desktop.
 Some clients also accept richer legacy payloads; that does not make those payloads portable.
 Custom renderer names require actual client registration and are outside the v1 contract.
+
+### Trees and distance matrices
+
+A phylogeny or other tree is a `graph` with `layout: "tree"`. The validator then requires
+one connected tree (exactly one fewer edge than nodes), non-negative numeric lengths,
+numeric support and a `root` that names a node. Without `layout: "tree"` these fields are
+display hints and are not checked, so older graphs stay valid. Put branch lengths on edges as
+`length` (with `length_unit`, for example `"substitutions/site"`) and bootstrap or other
+support on internal nodes as `support`. Name tips with `label`. `root` names the node the
+tree is drawn from; for an unrooted tree it is a display choice, so say so in `description`.
+Clients draw a tree as a tree with every tip shown, rather than as a network.
+
+A heatmap's colours span the data's own minimum and maximum unless `range` fixes them.
+Set `range` when the scale has a meaning of its own, such as `[0, 1]` for Jaccard
+distances, so small differences do not look large. Square symmetric matrices, such as
+pairwise distances, are drawn with similar rows grouped together; set `order: "given"`
+to keep the row order you supplied.
 
 ## Requirements and implementation
 

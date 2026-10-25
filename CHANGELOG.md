@@ -13,6 +13,24 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.40] - 2026-10-25
+
+### Added
+
+- `graph` visuals can describe a tree: `layout: "tree"`, an optional `root`,
+  branch `length` on edges with `length_unit`, and `support` on nodes. With
+  `layout: "tree"` the payload must be one connected tree. Labs Serve draws
+  trees as rectangular trees with every tip, support values and a scale bar,
+  including large tree-shaped graphs that do not declare the layout.
+- `heatmap` visuals accept `range: [min, max]` to fix the colour scale and
+  `order: "given"` to keep the supplied row order.
+
+### Changed
+
+- Labs Serve groups similar rows and columns of square symmetric heatmaps,
+  such as pairwise distances, says when the colour scale is fitted to the
+  data, and no longer prints unitless units such as "1".
+
 ## [0.0.39] - 2026-10-24
 
 ### Fixed

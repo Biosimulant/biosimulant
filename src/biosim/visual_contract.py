@@ -54,7 +54,8 @@ _CATALOG = {
         },
     ),
     "graph": (
-        "Measured or modeled networks and dependencies",
+        "Measured or modeled networks and dependencies; for a phylogeny or other tree, "
+        "set layout 'tree', give branch lengths as edge length and support as node support",
         {
             "nodes": [{"id": "A"}, {"id": "B"}],
             "edges": [{"source": "A", "target": "B"}],
@@ -160,6 +161,26 @@ def _source(value: Any, *, image: bool = False) -> bool:
     return False
 
 
+def _is_tree(ids: set[str], edges: list[dict[str, Any]]) -> bool:
+    """One connected component with exactly one fewer edge than nodes."""
+    if len(edges) != len(ids) - 1:
+        return False
+    parent = {node: node for node in ids}
+
+    def find(node: str) -> str:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for edge in edges:
+        a, b = find(edge["source"]), find(edge["target"])
+        if a == b:
+            return False
+        parent[a] = b
+    return True
+
+
 def validate_payload(spec: Any) -> str | None:
     """Validate portable v1, even if a legacy visual omits schema_version."""
     if not isinstance(spec, dict) or spec.get("schema_version", "1") != "1":
@@ -248,6 +269,18 @@ def validate_payload(spec: Any) -> str | None:
                     for e in edges
                 )
             )
+            # Tree fields are hints to renderers; declaring layout "tree" opts in
+            # to checking them, so graphs written before they existed stay valid.
+            if valid and data.get("layout") == "tree":
+                valid = (
+                    _is_tree(ids, edges)
+                    and all(
+                        "length" not in e or _number(e["length"]) and e["length"] >= 0
+                        for e in edges
+                    )
+                    and all("support" not in n or _number(n["support"]) for n in nodes)
+                    and ("root" not in data or data["root"] in ids)
+                )
     elif kind == "image":
         valid = _source(data.get("source"), image=True) or _safe_url(
             data.get("src", data.get("url")), image=True
@@ -431,16 +464,35 @@ def visual_spec_schema() -> dict[str, Any]:
                 "values": array(array(number)),
                 "x_labels": array(string),
                 "y_labels": array(string),
+                "range": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": number,
+                },
+                "order": {"enum": ["given", "similarity"]},
             },
             ["values"],
         ),
         "graph": obj(
             {
-                "nodes": array(obj({"id": string}, ["id"])),
+                "nodes": array(
+                    obj({"id": string, "label": string, "support": number}, ["id"])
+                ),
                 "edges": array(
-                    obj({"source": string, "target": string}, ["source", "target"]),
+                    obj(
+                        {
+                            "source": string,
+                            "target": string,
+                            "length": {"type": "number", "minimum": 0},
+                        },
+                        ["source", "target"],
+                    ),
                     empty=True,
                 ),
+                "layout": {"enum": ["network", "tree"]},
+                "root": string,
+                "length_unit": string,
             },
             ["nodes"],
         ),

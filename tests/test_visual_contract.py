@@ -24,6 +24,72 @@ def test_portable_catalog_and_payload_validation(kind):
     assert validate_payload({"schema_version": "1", "render": kind, "data": {}})
 
 
+def _graph(**data):
+    return {"schema_version": "1", "render": "graph", "data": data}
+
+
+TREE_NODES = [
+    {"id": "root"},
+    {"id": "n1", "support": 98},
+    {"id": "a", "label": "GCF_000005845.2"},
+    {"id": "b"},
+    {"id": "c"},
+]
+TREE_EDGES = [
+    {"source": "root", "target": "n1", "length": 0.01},
+    {"source": "n1", "target": "a", "length": 0.002},
+    {"source": "n1", "target": "b", "length": 0},
+    {"source": "root", "target": "c", "length": 0.03},
+]
+
+
+def test_graph_accepts_tree_layout_with_branch_lengths_and_support():
+    spec = _graph(
+        nodes=TREE_NODES,
+        edges=TREE_EDGES,
+        layout="tree",
+        root="root",
+        length_unit="substitutions/site",
+    )
+    assert validate_payload(spec) is None
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        # A cycle is not a tree.
+        {"edges": TREE_EDGES + [{"source": "a", "target": "c"}]},
+        # Two components are not one tree.
+        {"edges": TREE_EDGES[:3]},
+        {"edges": [{**TREE_EDGES[0], "length": -1}] + TREE_EDGES[1:]},
+        {"edges": [{**TREE_EDGES[0], "length": True}] + TREE_EDGES[1:]},
+        {"edges": TREE_EDGES, "root": "missing"},
+    ],
+)
+def test_tree_layout_rejects_inconsistent_tree_fields(data):
+    assert validate_payload(_graph(nodes=TREE_NODES, layout="tree", **data))
+
+
+def test_tree_fields_without_tree_layout_keep_existing_graphs_valid():
+    nodes = [{**TREE_NODES[1], "support": "98"}] + TREE_NODES[:1] + TREE_NODES[2:]
+    edges = TREE_EDGES + [{"source": "a", "target": "c", "length": -1}]
+    spec = _graph(nodes=nodes, edges=edges, layout="force", root="missing")
+    assert validate_payload(spec) is None
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"range": [0, 1], "order": "similarity"}, {"range": [1, 1]}, {"order": "clustered"}],
+)
+def test_heatmap_display_hints_never_invalidate_a_matrix(extra):
+    spec = {
+        "schema_version": "1",
+        "render": "heatmap",
+        "data": {"values": [[0, 0.01], [0.01, 0]], **extra},
+    }
+    assert validate_payload(spec) is None
+
+
 def _gallery_lab(path):
     path.mkdir()
     model = path / "models" / "result"
