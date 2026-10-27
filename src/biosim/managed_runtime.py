@@ -39,10 +39,16 @@ def run_package_with_managed_python(
     *,
     install_deps: bool = True,
     dependency_root: str | Path | None = None,
+    unpack_root: str | Path | None = None,
     in_process_runner: RunPackage | None = None,
 ) -> dict[str, Any]:
     runner = in_process_runner or (
-        lambda path: run_package(path, install_deps=install_deps)
+        lambda path: run_package(
+            path,
+            install_deps=install_deps,
+            dependency_root=dependency_root,
+            unpack_root=unpack_root,
+        )
     )
     if os.environ.get(BIOSIM_MANAGED_RUNTIME_CHILD_ENV) == "1":
         return runner(package_file)
@@ -53,13 +59,16 @@ def run_package_with_managed_python(
 
     python_path = ensure_executor_python(requested)
     _log_managed_python_handoff("package run", requested, python_path)
-    if dependency_root is None:
-        return run_child_package(python_path, package_file, install_deps=install_deps)
+    options: dict[str, Any] = {}
+    if dependency_root is not None:
+        options["dependency_root"] = dependency_root
+    if unpack_root is not None:
+        options["unpack_root"] = unpack_root
     return run_child_package(
         python_path,
         package_file,
         install_deps=install_deps,
-        dependency_root=dependency_root,
+        **options,
     )
 
 
