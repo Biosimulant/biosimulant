@@ -100,6 +100,7 @@ def _run_package_for_cli(
     *,
     install_deps: bool,
     dependency_root: str | Path | None = None,
+    unpack_root: str | Path | None = None,
 ) -> dict[str, Any]:
     from .progress_stream import progress_events_enabled
 
@@ -110,11 +111,13 @@ def _run_package_for_cli(
         package_file,
         install_deps=install_deps,
         dependency_root=dependency_root,
+        unpack_root=unpack_root,
         in_process_runner=lambda path: run_package(
             path,
             install_deps=install_deps,
             dependency_root=dependency_root,
             dependency_logger=dependency_logger,
+            unpack_root=unpack_root,
         ),
     )
 
@@ -474,6 +477,12 @@ def _populate_labs_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         help="Fail before execution unless declared CPU, memory, and GPU needs fit this host",
     )
     run_parser.add_argument("--results-file", type=Path, default=None)
+    run_parser.add_argument(
+        "--unpack-root",
+        type=Path,
+        default=None,
+        help="Keep the unpacked run and model-relative outputs here; the caller owns cleanup",
+    )
     run_parser.add_argument(
         "--report-file",
         type=Path,
@@ -886,6 +895,8 @@ def _main_labs(argv: list[str], *, prog: str = "biosimulant labs") -> None:
                     }
                     if args.dependency_root is not None:
                         run_kwargs["dependency_root"] = args.dependency_root
+                    if args.unpack_root is not None:
+                        run_kwargs["unpack_root"] = args.unpack_root.expanduser().resolve()
                     result = _run_package_for_cli(package_file, **run_kwargs)
                     if local_capability is not None:
                         result = {**result, "local_execution": local_capability}

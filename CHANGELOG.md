@@ -13,6 +13,15 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.41] - 2026-10-27
+
+### Added
+
+- `labs run --unpack-root <directory>` exposes caller-owned package extraction
+  through normal and managed-Python execution. Model-relative output files remain
+  available after command return so a caller can retain them before cleanup.
+  Existing commands keep temporary extraction when this option is omitted.
+
 ## [0.0.40] - 2026-10-25
 
 ### Added

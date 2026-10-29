@@ -250,6 +250,15 @@ The open-source CLI and Biosimulant platform share package interpretation semant
   `outputs.<module-alias>.<port>` in JSON result and report files
 - platform and desktop runs add durable artifact and run metadata for UI consumers
 
+For a caller that retains output files after the CLI exits, `labs run` accepts
+`--unpack-root <directory>`. This is the existing Python `run_package(unpack_root=...)`
+option exposed through the CLI and its managed-Python handoff. Use a new directory
+for each run/attempt. Model-relative files inside that extraction remain readable
+after return; the caller owns copying declared outputs to durable storage and
+removing the extraction afterward. This does not prevent a model from deleting
+files in its own temporary-directory context, and it does not collect or upload
+files itself. Omitting the option keeps the existing temporary extraction behavior.
+
 ## Registries And Cache
 
 The Python package still includes simple local package registry and cache helpers for API consumers:
