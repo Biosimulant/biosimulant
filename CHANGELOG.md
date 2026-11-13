@@ -13,6 +13,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.42] - 2026-11-13
+
+### Added
+
+- Export standalone HTML reports for completed Lab runs using
+  `biosimulant labs run --report-file <path>`.
+
 ### Changed
 
 - Redesign the standalone `labs run --report-file` HTML report as a scientific
