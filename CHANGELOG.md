@@ -13,6 +13,18 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- Redesign the standalone `labs run --report-file` HTML report as a scientific
+  run report. It identifies the run (package, version, outcome, simulated
+  duration, modules, runtime), leads with key numeric results, and follows them
+  with each module's tables and notes. Caveats and non-finite warnings sit next
+  to the results they qualify, and technical details stay collapsed. Numeric
+  table columns are right-aligned, and values keep their recorded precision up to six
+  significant figures. The layout works in narrow Studio previews, on desktop
+  and in print. The page stays self-contained, with inline CSS and no
+  executable script, and keeps the `biosimulant-report-data` payload.
+
 ## [0.0.41] - 2026-10-27
 
 ### Added
