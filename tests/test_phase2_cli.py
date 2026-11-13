@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from biosim.__about__ import __version__
 from biosim.__main__ import main
 from biosim.pack import validate_package
 from biosim.workspace import create_lab
@@ -83,7 +84,7 @@ def test_root_version_flag(capsys) -> None:
         main(["--version"], prog="biosimulant")
 
     assert exc_info.value.code == 0
-    assert capsys.readouterr().out.strip() == "biosimulant 0.0.41"
+    assert capsys.readouterr().out.strip() == f"biosimulant {__version__}"
 
 
 def test_labs_serve_uses_local_lab_ui_without_desktop(tmp_path: Path) -> None:
