@@ -1167,6 +1167,33 @@ class LabServeSession:
             runs = [run.to_dict() for run in self._runs.values()]
         return sorted(runs, key=lambda run: str(run.get("created_at") or ""), reverse=True)
 
+    def export_external_run(self, run_id: str, *, source: dict[str, str]) -> dict[str, Any]:
+        from ..external_run_bundle import write_external_run_bundle
+
+        with self._lock:
+            run = self.get_run(run_id)
+            if run.execution_target != "local" or run.status not in {"completed", "failed"}:
+                raise ValueError("Only terminal local runs can be exported.")
+            if not run.started_at or not run.completed_at:
+                raise ValueError("The run has no recorded start and completion times.")
+            root = self._run_store._run_dir(run.id)
+            directory = root / "external-run"
+            external_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"biosimulant:labs-serve:{self.lab_path}:{run.id}"))
+            if directory.exists():
+                existing = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+                if existing.get("source") != source or existing.get("external_id") != external_id:
+                    raise ValueError("The run has already been exported against a different source.")
+                return {"manifest_path": str(directory / "manifest.json"), "manifest": existing}
+            manifest = write_external_run_bundle(
+                directory, source=source, external_id=external_id,
+                status=run.status, started_at=run.started_at, completed_at=run.completed_at,
+                duration_seconds=run.duration_seconds, results=run.results or None,
+                output_root=root, input_values=run.parameters, simulation_config=run.simulation_config,
+                retained_artifacts=dict(run.artifacts),
+                error_message="The local runner reported a failure." if run.status == "failed" else None,
+            )
+            return {"manifest_path": str(directory / "manifest.json"), "manifest": manifest}
+
     def get_run(self, run_id: str) -> RunRecord:
         with self._lock:
             try:

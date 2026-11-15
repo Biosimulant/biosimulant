@@ -220,6 +220,20 @@ class LabMcpServer:
                 required=("run_id",),
             ),
             Tool(
+                name="run_export_bundle",
+                title="Export a finished local run",
+                description="Keep an offline bundle of a terminal local run and its saved files for external import. This does not sync anything.",
+                handler=self._run_export_bundle,
+                properties={
+                    "run_id": {"type": "string", "description": "Terminal local run."},
+                    "source_kind": {"type": "string", "enum": ["workspace_revision", "lab_version"]},
+                    "source_id": {"type": "string", "description": "Exact Biosimulant source ID."},
+                    "source_digest": {"type": "string", "description": "Digest of the exact source used."},
+                },
+                required=("run_id", "source_kind", "source_id", "source_digest"),
+                writes=True,
+            ),
+            Tool(
                 name="run_logs",
                 title="Read run logs",
                 description="Return a run's log lines, optionally only those after a sequence number.",
@@ -306,6 +320,13 @@ class LabMcpServer:
 
     def _run_results(self, run_id: Any = None) -> dict[str, Any]:
         return {"results": self.session.get_run(_string(run_id, "run_id")).results}
+
+    def _run_export_bundle(self, run_id: str, source_kind: str, source_id: str, source_digest: str) -> dict[str, Any]:
+        from ..external_run_bundle import external_run_source
+
+        return self.session.export_external_run(
+            _string(run_id, "run_id"), source=external_run_source(source_kind, source_id, source_digest)
+        )
 
     def _run_logs(self, run_id: Any = None, since_seq: Any = None) -> dict[str, Any]:
         logs = self.session.get_run(_string(run_id, "run_id")).logs
