@@ -185,7 +185,10 @@ def built_wheel(tmp_path_factory):
         pytest.skip("real dependency fixtures cover NumPy 1.26–2.5 on Python 3.12")
     destination = tmp_path_factory.mktemp("dependency-wheel")
     subprocess.run([sys.executable, "-m", "build", "--wheel", "--outdir", str(destination)], check=True, capture_output=True)
-    return next(destination.glob("biosimulant-*.whl"))
+    subprocess.run([sys.executable, "-m", "build", "src", "--wheel", "--outdir", str(destination)], check=True, capture_output=True)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("UV_FIND_LINKS", destination.as_uri())
+        yield next(destination.glob("biosimulant-*.whl"))
 
 
 @pytest.mark.integration
@@ -317,3 +320,49 @@ def test_cli_serve_prepares_environment_before_model_imports(tmp_path, built_whe
                 process.wait()
             log.seek(0)
             assert "Incompatible Python environment" not in log.read()
+
+
+@pytest.mark.integration
+def test_sdk_only_install_and_wheel_ownership(tmp_path, built_wheel):
+    from email.parser import BytesParser
+    from zipfile import ZipFile
+
+    sdk_wheel, = built_wheel.parent.glob("biosimulant_model_sdk-*.whl")
+    with ZipFile(sdk_wheel) as sdk, ZipFile(built_wheel) as executor:
+        assert not set(sdk.namelist()).intersection(executor.namelist())
+        def wheel_metadata(archive):
+            path, = (p for p in archive.namelist() if p.endswith(".dist-info/METADATA"))
+            return BytesParser().parsebytes(archive.read(path))
+        sdk_meta = wheel_metadata(sdk)
+        executor_meta = wheel_metadata(executor)
+        assert sdk_meta["Version"] == executor_meta["Version"]
+        assert f"biosimulant-model-sdk=={sdk_meta['Version']}" in executor_meta.get_all("Requires-Dist")
+    executable = tmp_path / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(tmp_path)], check=True)
+    subprocess.run([sys.executable, "-m", "uv", "pip", "install", "--no-index",
+                    "--python", str(executable), str(sdk_wheel)], check=True)
+    subprocess.run([str(executable), "-I", "-c", """
+from importlib.util import find_spec
+from biosim import BioModule, ScalarSignal
+from biosimulant.modules import BioModule as PublicModule
+assert PublicModule is BioModule
+assert ScalarSignal(source='counter', name='value', value=3, emitted_at=0).value == 3
+assert find_spec('numpy') is None
+assert find_spec('biosim.world') is None
+"""], check=True)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("pin", "success"), [("packaging==24.2", True), ("packaging==23.1", False)])
+def test_cli_wheel_preflight_with_candidate_executor(tmp_path, built_wheel, pin, success):
+    archive = make_lab(tmp_path / "counter", [pin])
+    result = subprocess.run(
+        [sys.executable, "-m", "biosimulant", "labs", "validate", str(archive),
+         "--check-dependencies", "--json"], capture_output=True, text=True,
+    )
+    if success:
+        assert result.returncode == 0, result.stderr
+        assert '"wheel_metadata"' in result.stdout
+    else:
+        assert result.returncode != 0
+        assert "packaging" in result.stderr + result.stdout

@@ -443,6 +443,8 @@ def _populate_labs_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
 
     validate_parser = subparsers.add_parser("validate", help="Validate a local lab source tree or .bsilab")
     validate_parser.add_argument("lab", type=Path, nargs="?", default=Path("."))
+    validate_parser.add_argument("--check-dependencies", action="store_true",
+                                 help="Resolve published wheels for this platform before running")
     validate_parser.add_argument("--json", action="store_true", dest="json_output")
 
     capabilities_parser = subparsers.add_parser(
@@ -851,6 +853,12 @@ def _main_labs(argv: list[str], *, prog: str = "biosimulant labs") -> None:
             if not result.valid:
                 _print_validation_failure(args.lab, result, json_output=args.json_output)
                 raise SystemExit(1)
+            if args.check_dependencies:
+                from .pack import check_package_dependencies
+                with _package_file_for_lab(args.lab) as package:
+                    result.metadata["dependency_check"] = check_package_dependencies(package)
+                if not args.json_output:
+                    print("Dependency wheels resolved for this platform.")
             _print_lab_validation_success(args.lab, result, json_output=args.json_output)
             return
         if args.command == "capabilities":

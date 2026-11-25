@@ -35,16 +35,18 @@ jobs:
         run: bash scripts/build_labs_serve_ui.sh
 
       - name: Build package distributions
-        run: python -m build --outdir dist/biosimulant
+        run: |
+          python -m build src --outdir "$PWD/dist/sdk"
+          python -m build --outdir dist/biosimulant
 
       - name: Check package distributions
-        run: twine check dist/biosimulant/*
+        run: twine check dist/sdk/* dist/biosimulant/*
 
       - name: Create release checksum manifest
         run: |
           mkdir -p dist/release
-          cd dist/biosimulant
-          sha256sum ./* > ../release/SHA256SUMS
+          (cd dist/sdk && sha256sum ./*) > dist/release/SHA256SUMS
+          (cd dist/biosimulant && sha256sum ./*) >> dist/release/SHA256SUMS
 
       - name: Sign release checksum provenance
         uses: actions/attest-build-provenance@v2
@@ -56,6 +58,12 @@ jobs:
         with:
           name: biosimulant-checksums
           path: dist/release/SHA256SUMS
+
+      - name: Publish model SDK to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/sdk
+          skip-existing: true
 
       - name: Publish biosimulant to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

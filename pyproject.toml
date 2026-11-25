@@ -25,6 +25,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
+  "biosimulant-model-sdk==0.0.43",
   "argcomplete>=3.5",
   "fastapi>=0.110,<1",
   "httpx>=0.26,<1",
@@ -122,10 +123,33 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
+exclude = [
+  "/src/biosim/__init__.py",
+  "/src/biosim/__about__.py",
+  "/src/biosim/_errors.py",
+  "/src/biosim/_legacy_profile_digests.py",
+  "/src/biosim/modules.py",
+  "/src/biosim/signals.py",
+  "/src/biosim/compatibility.py",
+  "/src/biosim/execution_outcome.py",
+  "/src/biosim/visual_contract.py",
+  "/src/biosim/visuals.py",
+  "/src/biosimulant/__init__.py",
+  "/src/biosimulant/compatibility.py",
+  "/src/biosimulant/execution_outcome.py",
+  "/src/biosimulant/modules.py",
+  "/src/biosimulant/signals.py",
+  "/src/biosimulant/visual_contract.py",
+  "/src/biosimulant/visuals.py",
+  "**/__pycache__",
+  "*.pyc",
+]
 packages = ["src/biosim", "src/biosimulant"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+  "src/pyproject.toml",
+  "src/LICENSE.txt",
   "src/biosim/**",
   "src/biosimulant/**",
   "tests/**",
@@ -138,3 +162,6 @@ include = [
   "LICENSE.txt",
   "pyproject.toml",
 ]
+
+[tool.uv.sources]
+biosimulant-model-sdk = {path = "src"}
