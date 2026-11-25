@@ -242,7 +242,7 @@ def isolated_environment(
     process_tracker: Callable[[Any], Any] | None = None,
     cancel_checker: Callable[[], None] | None = None,
 ) -> Iterator[Path]:
-    from .managed_runtime import _local_source_spec, _uv_command, _venv_python_path
+    from .managed_runtime import _local_source_spec, _source_sdk_args, _uv_command, _venv_python_path
 
     callbacks = dict(
         dependency_logger=dependency_logger, process_tracker=process_tracker,
@@ -267,7 +267,7 @@ def isolated_environment(
             artifacts = artifact_requirements(requirements, Path(wheelhouse), **target)
         # A single solve includes the runtime and every model's direct/transitive requirements.
         run_dependency_command(
-            [*uv, "pip", "install", "--python", str(executable), source, *requirements, *artifacts],
+            [*uv, "pip", "install", "--python", str(executable), *_source_sdk_args(source), source, *requirements, *artifacts],
             **callbacks,
         )
         try:

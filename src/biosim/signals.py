@@ -881,6 +881,8 @@ class BioSignal:
         self.value = value
         self.emitted_at = emitted_at
         self.spec = self._normalize_spec(spec)
+        if self.signal_type == "array" and self.spec and self.spec.dtype and not _HAS_NUMPY:
+            raise ValueError("Typed array signals require the NumPy array adapter")
         self._validate_value()
 
     def _normalize_spec(self, spec: Optional[SignalSpec | Mapping[str, Any]]) -> Optional[SignalSpec]:

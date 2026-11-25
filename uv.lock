@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -53,6 +53,7 @@ name = "biosimulant"
 source = { editable = "." }
 dependencies = [
     { name = "argcomplete" },
+    { name = "biosimulant-model-sdk" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -97,6 +98,7 @@ ml = [
 [package.metadata]
 requires-dist = [
     { name = "argcomplete", specifier = ">=3.5" },
+    { name = "biosimulant-model-sdk", directory = "src" },
     { name = "fastapi", specifier = ">=0.110,<1" },
     { name = "httpx", specifier = ">=0.26,<1" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.26" },
@@ -120,6 +122,14 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.23" },
 ]
 provides-extras = ["all", "cellml", "dev", "ml"]
+
+[[package]]
+name = "biosimulant-model-sdk"
+source = { directory = "src" }
+
+[package.metadata]
+requires-dist = [{ name = "numpy", marker = "extra == 'arrays'", specifier = ">=1.26" }]
+provides-extras = ["arrays"]
 
 [[package]]
 name = "certifi"

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "biosimulant-model-sdk"
+dynamic = ["version"]
+description = "Model authoring interfaces and typed signals for Biosimulant"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = []
+
+[project.optional-dependencies]
+arrays = ["numpy>=1.26"]
+
+[tool.hatch.version]
+path = "biosim/__about__.py"
+
+[tool.hatch.build]
+only-include = [
+  "biosim/__init__.py",
+  "biosim/__about__.py",
+  "biosim/_errors.py",
+  "biosim/_legacy_profile_digests.py",
+  "biosim/modules.py",
+  "biosim/signals.py",
+  "biosim/compatibility.py",
+  "biosim/execution_outcome.py",
+  "biosim/visual_contract.py",
+  "biosim/visuals.py",
+  "biosimulant/__init__.py",
+  "biosimulant/compatibility.py",
+  "biosimulant/execution_outcome.py",
+  "biosimulant/modules.py",
+  "biosimulant/signals.py",
+  "biosimulant/visual_contract.py",
+  "biosimulant/visuals.py",
+]

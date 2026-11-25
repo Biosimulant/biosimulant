@@ -401,7 +401,7 @@ def _install_biosimulant(uv_command: list[str], python_path: Path) -> None:
     _log_runtime_status(f"Installing Biosimulant into managed runtime: {python_path}")
     args = ["pip", "install"]
     if source_spec is not None and Path(source_spec).is_dir():
-        args.extend(["-e", spec])
+        args.extend([*_source_sdk_args(spec), "-e", spec])
     else:
         args.append(spec)
     args.extend(["--python", str(python_path)])
@@ -410,6 +410,12 @@ def _install_biosimulant(uv_command: list[str], python_path: Path) -> None:
         args,
         "uv failed to install Biosimulant into the managed runtime",
     )
+
+
+def _source_sdk_args(source: str) -> list[str]:
+    # A source checkout can be ahead of its published companion SDK wheel.
+    sdk = Path(source) / "src"
+    return [str(sdk)] if (sdk / "pyproject.toml").is_file() else []
 
 
 def _local_source_spec() -> str | None:

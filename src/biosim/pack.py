@@ -1891,6 +1891,30 @@ def _package_requirements(
     return collect_requirements(manifests, python_version=_declared_lab_python_version(loaded.manifest))
 
 
+def check_package_dependencies(path: str | Path) -> dict[str, Any]:
+    """Resolve published wheels for the Lab interpreter on the current platform."""
+    import platform
+    from .__about__ import __version__
+    from .dependency_runtime import run_dependency_command
+    from .managed_runtime import _uv_command
+
+    with tempfile.TemporaryDirectory(prefix="biosim-dependency-check-") as directory:
+        root = Path(directory)
+        loaded = _loaded_package_from_path(Path(path).resolve(), unpack_root=root / "package")
+        if loaded.package_type != "lab":
+            raise PackageError("Dependency checks require a Lab package")
+        python = _declared_lab_python_version(loaded.manifest) or platform.python_version()
+        pins = _package_requirements(loaded)
+        requirements = root / "requirements.in"
+        requirements.write_text("\n".join([f"biosimulant=={__version__}", *pins]) + "\n", encoding="utf-8")
+        run_dependency_command([
+            *_uv_command(), "pip", "compile", "--no-config", "--only-binary", ":all:",
+            "--python-version", python, "--output-file", str(root / "resolved.txt"), str(requirements),
+        ])
+        return {"status": "resolved", "check": "wheel_metadata", "python": python,
+                "platform": platform.platform(), "biosimulant": __version__}
+
+
 def run_package(
     path: str | Path,
     *,

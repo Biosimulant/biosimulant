@@ -133,6 +133,7 @@ biosimulant labs list .
 biosimulant labs get ./my-lab
 biosimulant labs package ./my-lab --out dist
 biosimulant labs validate ./my-lab
+biosimulant labs validate ./my-lab --check-dependencies
 biosimulant labs run ./my-lab --no-install-deps
 biosimulant labs serve ./my-lab
 ```

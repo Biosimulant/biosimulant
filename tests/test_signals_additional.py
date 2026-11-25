@@ -193,7 +193,9 @@ def test_base_signal_paths_and_serialisation(monkeypatch) -> None:
         RecordSignal("s", "r", {"payload": 1}, 0.0, spec=SignalSpec.record(schema={"payload": "json"})).as_float()
 
     monkeypatch.setattr(signals, "_HAS_NUMPY", False)
-    arr = ArraySignal("s", "a", [1.0, 2.0], 0.0, spec=array_spec)
+    with pytest.raises(ValueError, match="NumPy array adapter"):
+        ArraySignal("s", "a", ["hello", "world"], 0.0, spec=array_spec)
+    arr = ArraySignal("s", "a", [1.0, 2.0], 0.0)
     assert arr.as_array() == [1.0, 2.0]
     with pytest.raises(ValueError, match="not an array"):
         ScalarSignal("s", "x", 1.0, 0.0, spec=SignalSpec.scalar()).as_array()
