@@ -106,9 +106,13 @@ def plan_for_directory(root: Path) -> dict[str, Any] | None:
 
 def identity(plan: Mapping, python: str | Path) -> dict:
     executable = shutil.which(str(python)) or str(python)
+    # Normalize directory aliases (macOS /var -> /private/var), while keeping
+    # the final interpreter symlink: resolving that would erase venv identity.
+    executable_path = Path(executable).absolute()
+    executable = executable_path.parent.resolve() / executable_path.name
     return {
         "setup_sha256": plan["setup_sha256"],
-        "python": os.path.abspath(executable),
+        "python": os.path.normcase(str(executable)),
         "platform": sys.platform,
         "machine": platform.machine(),
         "runner_version": 1,

@@ -32,6 +32,22 @@ def plan(source):
     return setup_plan(source, load_yaml=yaml.safe_load)
 
 
+def test_interpreter_identity_normalizes_parent_alias_but_keeps_venv(tmp_path):
+    directory = tmp_path / "environment"
+    (directory / "bin").mkdir(parents=True)
+    interpreter = directory / "bin" / "python"
+    alias = tmp_path / "alias"
+    try:
+        interpreter.symlink_to(sys.executable)
+        alias.symlink_to(directory, target_is_directory=True)
+    except OSError:
+        pytest.skip("Creating symlinks is unavailable on this host")
+    setup = plan(files())
+    expected = runner.identity(setup, interpreter)
+    assert runner.identity(setup, alias / "bin" / "python") == expected
+    assert expected != runner.identity(setup, sys.executable)
+
+
 @pytest.mark.parametrize(
     "value",
     [
