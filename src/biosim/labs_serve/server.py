@@ -1034,6 +1034,11 @@ class LabServeSession:
             self._runtime_metadata_error = None
 
     def _introspected_ports(self) -> dict[str, dict[str, list[dict[str, Any]]]]:
+        from biosim.runtime_setup import plan_for_directory
+        if plan_for_directory(self.lab_path) is not None:
+            # Static manifest ports remain available. Previewing cannot install
+            # software or import a model that requires unprepared system tools.
+            return {}
         with (
             _package_file_for_lab(self.lab_path) as package_file,
             tempfile.TemporaryDirectory(prefix="biosim-serve-introspect-") as unpack_dir,
@@ -1429,6 +1434,22 @@ class LabServeSession:
                 simulation_config=run.simulation_config,
             )
             _write_lab_manifest(source, manifest)
+            from biosim.runtime_setup import plan_for_directory
+            if plan_for_directory(source) is not None:
+                from biosim.pack import run_package
+                with _package_file_for_lab(source) as package_file, tempfile.TemporaryDirectory(prefix="biosim-setup-run-") as unpack_dir:
+                    result = run_package(
+                        package_file, install_deps=self.install_deps, unpack_root=unpack_dir,
+                        dependency_logger=lambda line: self._log_run(run, "info", line, source="runtime", echo_terminal=True),
+                        dependency_process_tracker=run.cancellation.track_process,
+                        cancel_checker=run.cancellation.check_cancelled,
+                    )
+                    artifacts: dict[str, Path] = {}
+                    result["visuals"] = _sanitize_visuals(result.get("visuals", []), run_id=run.id, artifacts=artifacts)
+                    durable = self._run_store.persist_artifacts(run.id, artifacts, result)
+                    with self._lock:
+                        run.artifacts = durable
+                    return result
             with (
                 _package_file_for_lab(source) as package_file,
                 tempfile.TemporaryDirectory(prefix="biosim-serve-unpack-") as unpack_dir,

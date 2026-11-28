@@ -28,6 +28,7 @@ YAML config format (simplified):
         to: [module_b.input]
 """
 from __future__ import annotations
+from .runtime_setup_contract import SetupError
 
 import argparse
 import hashlib
@@ -986,7 +987,7 @@ def _main_labs(argv: list[str], *, prog: str = "biosimulant labs") -> None:
             _write_compatibility_failure_results(args.results_file, exc)
         _print_compatibility_error(exc, json_output=getattr(args, "json_output", False))
         raise SystemExit(2) from exc
-    except PackageError as exc:
+    except (PackageError, SetupError) as exc:
         _print_pack_error(exc, json_output=getattr(args, "json_output", False))
         raise SystemExit(1) from exc
 

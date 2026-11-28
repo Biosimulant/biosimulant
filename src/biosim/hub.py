@@ -325,6 +325,14 @@ def _apply_tree_to_world(
     from .dependency_runtime import collect_requirements, require_current_environment
 
     manifests = list(dependency_manifests or [])
+    from .runtime_setup import plan_for_directory, require_prepared
+    from .runtime_setup_contract import parse_setup
+    if any(parse_setup(manifest.get("runtime")) for _origin, manifest in manifests):
+        root = Path(manifests[0][0]).parent
+        plan = plan_for_directory(root)
+        if plan is None:
+            raise PackageError("Vendor package-backed child Labs before setup; the current source does not contain their preparation context.")
+        require_prepared(plan)
     manifests.extend(
         (entry["alias"], _load_model_manifest_from_dir(Path(entry["model_dir"])))
         for entry in flattened.models

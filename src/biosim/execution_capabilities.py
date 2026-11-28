@@ -188,6 +188,17 @@ def evaluate_local_execution_capability(
     host_snapshot = dict(host or detect_host_execution_capabilities())
     blockers: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
+    from .runtime_setup_contract import SetupError, parse_setup
+    try:
+        setup = parse_setup(manifest.get("runtime"))
+        if setup:
+            requirements["runtime_setup"] = {"supported": True, "version": 1, **setup}
+            warnings.append({"code": "runtime_setup_declared", "message": "This Lab runs setup before dependencies with the current user's permissions. Setup must support this host OS; no privilege elevation is performed."})
+    except SetupError as exc:
+        blockers.append({"code": exc.code, "message": str(exc)})
+    runtime = manifest.get("runtime")
+    if isinstance(runtime, Mapping) and runtime.get("environment"):
+        blockers.append({"code": "runtime_environment_requires_cloud", "message": "This Lab declares a hosted base/source/lock environment; a local virtual environment cannot honor it."})
     cpu = host_snapshot.get("cpu") if isinstance(host_snapshot.get("cpu"), Mapping) else {}
     logical_cores = cpu.get("logical_cores")
     required_cores = requirements["cpu_cores"]

@@ -339,3 +339,8 @@ current environment and report incompatible requirements.
 the server. If an edit changes dependency pins, restart the server to prepare
 the new environment. Model objects, typed signals and wiring still share one
 process within each lab; incompatible per-model environments are not supported.
+
+
+## Environment setup
+
+Labs may declare [runtime.setup](runtime-setup.md) for software preparation before dependency installation and model imports (biosimulant 0.0.43+).

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext
@@ -152,10 +153,18 @@ def environment_record() -> dict[str, Any]:
                 "version": version, "path": getattr(module, "__file__", None),
                 "distributions": distributions,
             }
+    from .runtime_setup import PREPARED_ENV
+    setup_record = None
+    try:
+        if os.environ.get(PREPARED_ENV):
+            setup_record = json.loads(Path(os.environ[PREPARED_ENV]).read_text())
+    except (OSError, ValueError):
+        pass
     return {
         "python": platform.python_version(), "platform": platform.platform(),
         "biosimulant": __version__, "packages": dict(sorted(packages.items())),
         "imported": imported,
+        **({"setup": setup_record} if setup_record else {}),
     }
 
 
@@ -164,6 +173,7 @@ def run_dependency_command(
     dependency_logger: Callable[[str], None] | None = None,
     process_tracker: Callable[[Any], Any] | None = None,
     cancel_checker: Callable[[], None] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> str:
     from .pack import _new_process_group_kwargs
 
@@ -171,7 +181,7 @@ def run_dependency_command(
         cancel_checker()
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        bufsize=1, **_new_process_group_kwargs(),
+        bufsize=1, **({"env": dict(env)} if env is not None else {}), **_new_process_group_kwargs(),
     )
     lines: list[str] = []
     recent: deque[str] = deque(maxlen=40)
@@ -241,6 +251,7 @@ def isolated_environment(
     dependency_logger: Callable[[str], None] | None = None,
     process_tracker: Callable[[Any], Any] | None = None,
     cancel_checker: Callable[[], None] | None = None,
+    setup: tuple[dict, Path] | None = None,
 ) -> Iterator[Path]:
     from .managed_runtime import _local_source_spec, _uv_command, _venv_python_path
 
@@ -248,11 +259,28 @@ def isolated_environment(
         dependency_logger=dependency_logger, process_tracker=process_tracker,
         cancel_checker=cancel_checker,
     )
+    if setup is not None:
+        deadline = time.monotonic() + 3600
+        def check_preparation():
+            if cancel_checker:
+                cancel_checker()
+            if time.monotonic() >= deadline:
+                from .runtime_setup_contract import SetupError
+                raise SetupError("runtime_setup_timeout", "Environment preparation exceeded its one-hour deadline.")
+        callbacks["cancel_checker"] = check_preparation
     uv = _uv_command()
     with tempfile.TemporaryDirectory(prefix="biosimulant-lab-env-") as directory:
         root = Path(directory)
         run_dependency_command([*uv, "venv", "--python", str(python), str(root)], **callbacks)
         executable = _venv_python_path(root)
+        if setup is not None:
+            from .runtime_setup import execute_setup
+            plan, source_root = setup
+            execute_setup(plan, source_root, python=executable, prefix=root,
+                          logger=dependency_logger, process_tracker=process_tracker,
+                          cancel_checker=callbacks["cancel_checker"])
+            from .runtime_setup import preparation_environment
+            callbacks["env"] = preparation_environment(executable, os.environ)
         source = _local_source_spec() or f"biosimulant=={__version__}"
         from .tellurium_artifacts import WHEELHOUSE_ENV, artifact_requirements, requests_candidate
         artifacts: list[str] = []
