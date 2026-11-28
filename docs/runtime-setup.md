@@ -1,6 +1,6 @@
 # Lab environment setup
 
-`biosimulant` 0.0.43 introduces optional `lab.yaml` `runtime.setup`. It prepares
+`biosimulant` 0.0.44 introduces optional `lab.yaml` `runtime.setup`. It prepares
 software before Lab/model dependency installation and model imports. No extra
 file or Dockerfile is required:
 
@@ -80,7 +80,7 @@ guaranteed.
 The platform builds setup inside the existing isolated Modal image preparation,
 before Lab dependency resolution/installation, then reuses successful provider
 image layers when available. Setup-only Labs also use this preparation path.
-The selected hosted runtime must support 0.0.43; older runtimes/providers return
+The selected hosted runtime must support 0.0.44; older runtimes/providers return
 a blocker. Release availability and deployment are separate from source support.
 
 `environment.lock` still exists. `environment.yaml` was retired. Setup-bearing

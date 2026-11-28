@@ -13,6 +13,12 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.44] - 2026-11-28
+
+### Added
+
+- Optional Lab `runtime.setup.command` prepares software before dependencies and model imports, with bounded execution, immutable source identity and preparation provenance.
+
 ## [0.0.43] - 2026-11-20
 
 ### Added

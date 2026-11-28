@@ -343,4 +343,4 @@ process within each lab; incompatible per-model environments are not supported.
 
 ## Environment setup
 
-Labs may declare [runtime.setup](runtime-setup.md) for software preparation before dependency installation and model imports (biosimulant 0.0.43+).
+Labs may declare [runtime.setup](runtime-setup.md) for software preparation before dependency installation and model imports (biosimulant 0.0.44+).
