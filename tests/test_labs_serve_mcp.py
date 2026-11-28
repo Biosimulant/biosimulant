@@ -217,3 +217,36 @@ def test_runs_come_back_newest_first(tmp_path: Path) -> None:
         "run-new",
         "run-old",
     ]
+
+
+def test_terminal_local_run_exports_a_portable_bundle(tmp_path: Path) -> None:
+    import hashlib
+    from uuid import uuid4
+
+    client, session = _client(tmp_path)
+    record = RunRecord(
+        id="run-export", lab_id="lab", parameters={"count": 2}, simulation_config={},
+        status="completed", started_at="2026-10-01T00:00:00Z", completed_at="2026-10-01T00:00:01Z",
+    )
+    root = session.lab_path / ".biosimulant" / "runs" / record.id
+    root.mkdir(parents=True)
+    csv = root / "count.csv"
+    csv.write_bytes(b"count\n2\n")
+    external = tmp_path / "private.txt"
+    external.write_bytes(b"outside approved output root")
+    record.artifacts = {"counter-csv": csv}
+    record.results = {"outputs": {"count": {"value": 2}, "file": {"value": str(csv)}, "ignored": {"value": str(external)}}}
+    session._runs = {record.id: record}
+    request = {"run_id": record.id, "source_kind": "workspace_revision", "source_id": str(uuid4()), "source_digest": "a" * 64}
+    result = _call(client, "run_export_bundle", request)
+    assert result["isError"] is False, result
+    data = json.loads(result["content"][0]["text"])
+    bundle = Path(data["manifest_path"]).parent
+    files = {entry["artifact_id"]: entry for entry in data["manifest"]["files"]}
+    assert set(files) == {"counter-csv", "workspace-results"}
+    contents = (bundle / files["counter-csv"]["path"]).read_bytes()
+    assert hashlib.sha256(contents).hexdigest() == files["counter-csv"]["sha256"]
+    results = (bundle / files["workspace-results"]["path"]).read_text(encoding="utf-8")
+    assert "artifact:counter-csv" in results and str(tmp_path) not in results
+    retry = _call(client, "run_export_bundle", request)
+    assert json.loads(retry["content"][0]["text"]) == data

@@ -28,6 +28,7 @@ YAML config format (simplified):
         to: [module_b.input]
 """
 from __future__ import annotations
+from .runtime_setup_contract import SetupError
 
 import argparse
 import hashlib
@@ -37,6 +38,9 @@ import shutil
 import shlex
 import sys
 import tempfile
+from datetime import datetime, timezone
+from time import monotonic
+from uuid import uuid4
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -49,6 +53,7 @@ from .__about__ import __version__
 from ._starter import write_starter_model
 from .labs_serve import serve_lab
 from .execution_capabilities import inspect_local_execution_capability
+from .external_run_bundle import external_run_source, write_external_run_bundle
 from .compatibility import CompatibilityError
 from .managed_runtime import (
     run_labs_serve_with_managed_python,
@@ -477,6 +482,10 @@ def _populate_labs_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentP
         help="Fail before execution unless declared CPU, memory, and GPU needs fit this host",
     )
     run_parser.add_argument("--results-file", type=Path, default=None)
+    run_parser.add_argument("--run-bundle", type=Path, default=None, help="Keep an offline run bundle for external import.")
+    run_parser.add_argument("--run-source-kind", choices=("workspace_revision", "lab_version"))
+    run_parser.add_argument("--run-source-id", help="Exact Biosimulant workspace revision or Lab version ID.")
+    run_parser.add_argument("--run-source-digest", help="Digest of the exact source used for the local run.")
     run_parser.add_argument(
         "--unpack-root",
         type=Path,
@@ -869,6 +878,17 @@ def _main_labs(argv: list[str], *, prog: str = "biosimulant labs") -> None:
             _print_local_execution_capability(capability, json_output=args.json_output)
             return
         if args.command == "run":
+            source_bits = (args.run_source_kind, args.run_source_id, args.run_source_digest)
+            if bool(args.run_bundle) != all(source_bits) or (any(source_bits) and not all(source_bits)):
+                raise PackageError("--run-bundle requires --run-source-kind, --run-source-id and --run-source-digest together.")
+            source = None
+            if args.run_bundle:
+                try:
+                    source = external_run_source(*source_bits)
+                except ValueError as exc:
+                    raise PackageError(str(exc)) from exc
+                if args.run_bundle.exists() or args.run_bundle.is_symlink():
+                    raise PackageError("The external run bundle destination already exists.")
             lab_path, _pull = _resolve_runtime_lab_path(
                 args.lab,
                 target=args.target,
@@ -897,7 +917,10 @@ def _main_labs(argv: list[str], *, prog: str = "biosimulant labs") -> None:
                         run_kwargs["dependency_root"] = args.dependency_root
                     if args.unpack_root is not None:
                         run_kwargs["unpack_root"] = args.unpack_root.expanduser().resolve()
-                    result = _run_package_for_cli(package_file, **run_kwargs)
+                    if source is not None:
+                        result = _run_and_bundle(package_file, args, source, run_kwargs)
+                    else:
+                        result = _run_package_for_cli(package_file, **run_kwargs)
                     if local_capability is not None:
                         result = {**result, "local_execution": local_capability}
                     if args.report_file:
@@ -964,7 +987,7 @@ def _main_labs(argv: list[str], *, prog: str = "biosimulant labs") -> None:
             _write_compatibility_failure_results(args.results_file, exc)
         _print_compatibility_error(exc, json_output=getattr(args, "json_output", False))
         raise SystemExit(2) from exc
-    except PackageError as exc:
+    except (PackageError, SetupError) as exc:
         _print_pack_error(exc, json_output=getattr(args, "json_output", False))
         raise SystemExit(1) from exc
 
@@ -1886,6 +1909,41 @@ def _print_run_result(package_file: Path, result: dict[str, Any], *, json_output
         print(f"Duration: {result['duration']}")
     if result.get("report_file"):
         print(f"Report: {result['report_file']}")
+
+
+def _run_and_bundle(package_file: Path, args: argparse.Namespace, source: dict[str, str], run_kwargs: dict[str, Any]) -> dict[str, Any]:
+    settings = json.loads(args.run_input_file.expanduser().read_text(encoding="utf-8")) if args.run_input_file else {}
+    started_at = datetime.now(timezone.utc).isoformat()
+    started = monotonic()
+    external_id = str(uuid4())
+
+    with tempfile.TemporaryDirectory(prefix="biosimulant-run-bundle-") as scratch:
+        root = run_kwargs.setdefault("unpack_root", Path(scratch) / "unpacked")
+
+        def save(result, error=None):
+            try:
+                write_external_run_bundle(
+                    args.run_bundle, source=source, external_id=external_id,
+                    status="failed" if error else "completed",
+                    started_at=started_at, completed_at=datetime.now(timezone.utc).isoformat(),
+                    duration_seconds=monotonic() - started, results=result,
+                    output_root=Path(root), parameters=settings.get("parameters"),
+                    simulation_config={
+                        **{key: result[key] for key in ("duration", "communication_step", "settle_steps") if result and key in result},
+                        **(settings.get("simulation_config") or {}),
+                    },
+                    error_message=error,
+                )
+            except (OSError, ValueError) as exc:
+                raise PackageError(f"Could not export external run bundle: {exc}") from exc
+
+        try:
+            result = _run_package_for_cli(package_file, **run_kwargs)
+        except Exception:
+            save(None, "The local runtime failed; see the original local CLI output.")
+            raise
+        save(result)
+        return {**result, "run_bundle": str(args.run_bundle / "manifest.json")}
 
 
 def _write_compatibility_failure_results(results_file: Path, exc: CompatibilityError) -> None:

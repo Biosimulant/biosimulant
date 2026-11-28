@@ -1543,6 +1543,9 @@ def _prepare_lab_loaded_package(
     if not isinstance(runtime, Mapping):
         raise PackageError("Lab manifest must contain models, wiring, and runtime")
     _ensure_lab_python_version_matches_current(loaded.manifest)
+    from .runtime_setup import plan_for_directory, require_prepared, require_supported_environment
+    require_supported_environment(loaded.manifest)
+    require_prepared(plan_for_directory(loaded.payload_root))
     from .dependency_runtime import require_current_environment
 
     require_current_environment(_package_requirements(loaded, dependency_root))
@@ -1919,13 +1922,17 @@ def run_package(
     if loaded.package_type == "lab":
         root = Path(dependency_root).expanduser().resolve() if dependency_root else None
         requirements = _package_requirements(loaded, root)
-        if install_deps and requirements:
+        from .runtime_setup import plan_for_directory, require_supported_environment
+        require_supported_environment(loaded.manifest)
+        setup = plan_for_directory(loaded.payload_root)
+        if install_deps and (requirements or setup):
             from .dependency_runtime import isolated_environment
             from .managed_runtime import run_child_package
 
             with isolated_environment(
                 requirements, dependency_logger=dependency_logger,
                 process_tracker=dependency_process_tracker, cancel_checker=cancel_checker,
+                **({"setup": (setup, loaded.payload_root)} if setup else {}),
             ) as python:
                 return run_child_package(
                     python, loaded.package_path, install_deps=False,
@@ -1975,6 +1982,9 @@ def prepare_lab_package(
 
 
 def _validate_model_manifest(manifest: Mapping[str, Any]) -> None:
+    runtime = manifest.get("runtime")
+    if isinstance(runtime, Mapping) and "setup" in runtime:
+        raise PackageError("Declare runtime.setup in lab.yaml, not model.yaml.")
     bsim = manifest.get("biosim")
     if not isinstance(bsim, Mapping):
         raise PackageError("Model manifest must contain a biosim block")
@@ -2057,6 +2067,11 @@ def _validate_lab_lock_for_archive(
 
 
 def _validate_lab_manifest(manifest: Mapping[str, Any]) -> None:
+    from .runtime_setup_contract import parse_setup, SetupError
+    try:
+        parse_setup(manifest.get("runtime"))
+    except SetupError as exc:
+        raise PackageError(f"{exc.code}: {exc}") from exc
     errors = validate_requirements(manifest.get("visualization"))
     if errors:
         raise PackageError("; ".join(errors))

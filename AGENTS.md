@@ -55,3 +55,7 @@ Tip: Import the library as `import biosim`.
 - Frontend source is private React/Vite under `packages/labs-serve-ui`; built assets ship inside the Python wheel.
 - The SPA uses `/api/lab`, `/api/runs`, `/api/runs/{id}`, `/api/runs/{id}/results`, and mutation endpoints for local manifest/layout edits.
 - VisualSpec JSON contract drives rendering (timeseries, bar, table, image, graph, structure3d, JSON fallback).
+
+## Runtime setup contract
+
+`runtime_setup_contract.py` owns the portable `runtime.setup` contract. Keep setup before Lab dependencies and model imports, outside BioWorld. Validation/preview never executes setup. Changes require real subprocess/cancellation tests and regeneration of backend copies using `scripts/sync_runtime_setup.py`; never hand-edit generated contracts.

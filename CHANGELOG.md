@@ -13,6 +13,19 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.0.44] - 2026-11-28
+
+### Added
+
+- Optional Lab `runtime.setup.command` prepares software before dependencies and model imports, with bounded execution, immutable source identity and preparation provenance.
+
+## [0.0.43] - 2026-11-20
+
+### Added
+
+- `biosimulant labs run --run-bundle` exports portable results and artifacts
+  with file checksums and an exact workspace revision or Lab version.
+
 ## [0.0.42] - 2026-11-13
 
 ### Added

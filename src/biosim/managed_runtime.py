@@ -87,6 +87,10 @@ def run_labs_serve_with_managed_python(
     )
     from .dependency_runtime import isolated_environment
     requirements = requested_package_requirements(package_file)
+    if requested_package_has_setup(package_file):
+        # Browsing a Lab must not execute setup. Each requested serve run
+        # prepares and executes in its own child environment.
+        requirements = []
     if not requirements and python_path == Path(sys.executable):
         return None
     environment = (
@@ -133,6 +137,13 @@ def requested_package_requirements(package_file: str | Path) -> list[str]:
             Path(package_file).expanduser().resolve(), unpack_root=Path(directory),
         )
         return _package_requirements(loaded)
+
+
+def requested_package_has_setup(package_file: str | Path) -> bool:
+    from .runtime_setup import plan_for_directory
+    with tempfile.TemporaryDirectory(prefix="biosim-setup-inspect-") as directory:
+        loaded = _loaded_package_from_path(Path(package_file), unpack_root=Path(directory))
+        return plan_for_directory(loaded.payload_root) is not None
 
 
 def ensure_executor_python(python_version: str) -> Path:
@@ -204,6 +215,11 @@ def run_child_package(
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
     env["PATH"] = str(python_path.parent) + os.pathsep + env.get("PATH", "")
+    from .runtime_setup import PREPARED_ENV
+    record = python_path.parent.parent / "setup-record.json"
+    if record.is_file():
+        env[PREPARED_ENV] = str(record)
+        env["BIOSIM_ENV_PREFIX"] = str(record.parent)
     command = [
         str(python_path),
         "-c",
